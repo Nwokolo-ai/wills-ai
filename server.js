@@ -130,12 +130,12 @@ app.post('/api/telegram/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-cron.schedule('0 */6 * * *', async () => {
-  console.log('[cron] calendar fetch');
-  try { const { scrape } = require('./ffScraper'); await scrape(); }
-  catch (e) { console.error('[cron] calendar:', e.message); }
+// Daily safety-net full refresh at 4 AM (in case per-event timer missed anything)
+cron.schedule('0 4 * * *', async () => {
+  console.log('[cron] daily full refresh');
+  try { const { scrapeFull } = require('./ffScraper'); await scrapeFull(); }
+  catch (e) { console.error('[cron] daily:', e.message); }
 });
-
 cron.schedule('*/30 * * * *', async () => {
   console.log('[cron] news fetch');
   try { const { fetchAll } = require('./newsScraper'); await fetchAll(); }
