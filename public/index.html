@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#00f5a0" />
+<title>Will's AI</title>
+<link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  /* Panels hidden until .open is added */
+  #authPanel, #prefPanel, #authOverlay { display: none !important; }
+  #authPanel.open, #prefPanel.open, #authOverlay.open { display: block !important; }
+</style>
+</head>
+<body data-theme="dark">
+
+<div class="top">
+  <div class="brand">Will's AI</div>
+  <div class="header-right">
+    <div class="theme-switch">
+      <div class="theme-btn dark active" data-theme="dark" title="Dark"></div>
+      <div class="theme-btn light" data-theme="light" title="Light"></div>
+      <div class="theme-btn ocean" data-theme="ocean" title="Ocean"></div>
+      <div class="theme-btn sunset" data-theme="sunset" title="Sunset"></div>
+    </div>
+    <div id="authArea"></div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="calendar">📅 Calendar</button>
+  <button class="tab-btn" data-tab="news">📰 News</button>
+</div>
+
+<div class="panel active" id="panel-calendar">
+  <div class="day-filter">
+    <button class="day-btn active" data-day="today">Today</button>
+    <button class="day-btn" data-day="tomorrow">Tomorrow</button>
+    <button class="day-btn" data-day="week">This Week</button>
+    <button class="day-btn" data-day="all">All</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="lbl">Total</div><div class="val" id="statTotal">—</div></div>
+    <div class="stat"><div class="lbl">High Impact</div><div class="val high" id="statHigh">—</div></div>
+    <div class="stat"><div class="lbl">Medium Impact</div><div class="val medium" id="statMedium">—</div></div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="col-time">Time</th>
+          <th class="col-ccy">CCY</th>
+          <th class="col-imp">Impact</th>
+          <th class="col-event">Event</th>
+          <th class="col-num">Actual</th>
+          <th class="col-num">Forecast</th>
+          <th class="col-num">Previous</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="7" class="empty">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel" id="panel-news">
+  <div class="news-controls">
+    <button class="day-btn active" data-cat="all">All</button>
+    <button class="day-btn" data-cat="forex">Forex</button>
+    <button class="day-btn" data-cat="crypto">Crypto</button>
+    <button class="day-btn" data-cat="commodities">Commodities</button>
+    <button class="day-btn" data-cat="economy">Economy</button>
+    <button class="day-btn" data-cat="stocks">Stocks</button>
+    <button class="day-btn" data-cat="markets">Markets</button>
+    <input type="text" id="newsSearch" placeholder="Search news…" />
+  </div>
+  <div class="news-grid" id="newsGrid">
+    <div class="empty">Loading news…</div>
+  </div>
+</div>
+
+<div class="auth-overlay" id="authOverlay"></div>
+
+<aside class="auth-panel" id="authPanel">
+  <button class="auth-close" id="authClose" aria-label="Close">✕</button>
+
+  <div class="auth-view active" id="viewLogin">
+    <h2>Welcome back</h2>
+    <p class="auth-sub">Log in to receive event and news alerts.</p>
+    <form id="formLogin" class="auth-form">
+      <label>Username
+        <input type="text" id="loginUsername" placeholder="Your username" autocomplete="username" required />
+      </label>
+      <label>PIN
+        <input type="password" id="loginPin" placeholder="Your PIN" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" autocomplete="current-password" required />
+      </label>
+      <div class="auth-error" id="loginError"></div>
+      <button type="submit" class="auth-submit" id="loginSubmit">Log in</button>
+      <div class="auth-links">
+        <span>New here?</span>
+        <button type="button" class="auth-link" id="toSignup">Create an account →</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="auth-view" id="viewSignup">
+    <h2>Create your account</h2>
+    <p class="auth-sub">Quick signup — takes 15 seconds.</p>
+    <form id="formSignup" class="auth-form">
+      <label>Username <span class="req">required</span>
+        <input type="text" id="signupUsername" placeholder="e.g. willtrader" autocomplete="username" required minlength="3" maxlength="20" />
+        <small>3–20 characters. Letters, numbers, _ and - only.</small>
+      </label>
+      <label>PIN <span class="req">required</span>
+        <input type="password" id="signupPin" placeholder="At least 6 digits" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" autocomplete="new-password" required />
+        <small>Digits only. Avoid patterns like 123456.</small>
+      </label>
+      <label>Email <span class="opt">optional — for alerts</span>
+        <input type="email" id="signupEmail" placeholder="you@example.com" autocomplete="email" />
+        <small>Check your Spam folder if you don't see the welcome email.</small>
+      </label>
+      <div class="auth-error" id="signupError"></div>
+      <button type="submit" class="auth-submit" id="signupSubmit">Create account</button>
+      <div class="auth-links">
+        <span>Already have an account?</span>
+        <button type="button" class="auth-link" id="toLogin">Log in →</button>
+      </div>
+    </form>
+  </div>
+</aside>
+
+<aside class="pref-panel" id="prefPanel">
+  <button class="auth-close" id="prefClose" aria-label="Close">✕</button>
+  <h2 style="margin-bottom:6px;">Alert preferences</h2>
+  <p class="auth-sub">Choose what you want to be notified about.</p>
+  <div id="prefContent">
+    <div class="pref-loading">Loading…</div>
+  </div>
+</aside>
+
+<script src="/auth-client.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+node_modules/
+data/*.json
+!data/.gitkeep
+.env
+.env.local
+config.json
+*.log
+pm2-*.log
+.DS_Store
+.vscode/
