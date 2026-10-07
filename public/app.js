@@ -5,12 +5,27 @@
 let allEvents = [];
 let allNews = [];
 let dayFilter = 'today';
+let currencyFilter = 'all';
 let newsCat = 'all';
 let newsSearch = '';
+let timezoneMode = localStorage.getItem('wills_timezone_mode') || 'utc';
 let autoScrollDone = false;
+let countdownInterval = null;
 
 const $ = id => document.getElementById(id);
 
+// ── Currency flags ──
+const FLAGS = {
+  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵',
+  AUD: '🇦🇺', NZD: '🇳🇿', CAD: '🇨🇦', CHF: '🇨🇭',
+  CNY: '🇨🇳', ALL: '🌐',
+};
+
+function flag(code) {
+  return FLAGS[(code || '').toUpperCase()] || '🏳️';
+}
+
+// ── Helpers ──
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -57,11 +72,50 @@ function isThisWeek(s) {
   return d >= start && d < end;
 }
 
-function filterByDay(events) {
-  if (dayFilter === 'today') return events.filter(e => isToday(e.date));
-  if (dayFilter === 'tomorrow') return events.filter(e => isTomorrow(e.date));
-  if (dayFilter === 'week') return events.filter(e => isThisWeek(e.date));
-  return events;
+// ── Countdown formatter ──
+function formatCountdown(isoTimestamp) {
+  if (!isoTimestamp) return '';
+  const d = new Date(isoTimestamp);
+  if (isNaN(d.getTime())) return '';
+  const diffMs = d.getTime() - Date.now();
+  const past = diffMs < 0;
+  const abs = Math.abs(diffMs);
+
+  const totalMin = Math.floor(abs / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+
+  let text;
+  if (days > 0) text = `${days}d ${hours}h`;
+  else if (hours > 0) text = `${hours}h ${mins}m`;
+  else text = `${mins}m`;
+
+  return past ? `${text} ago` : `in ${text}`;
+}
+
+// ── Timezone helpers ──
+function getShortTimezoneLabel() {
+  if (timezoneMode === 'utc') return 'UTC';
+  try {
+    const parts = new Date().toLocaleTimeString('en-US', { timeZoneName: 'short' }).split(' ');
+    const abbr = parts[parts.length - 1];
+    return abbr && abbr.length <= 6 ? abbr : 'Local';
+  } catch { return 'Local'; }
+}
+
+function formatTimeInMode(isoTimestamp, fallback = '—') {
+  if (!isoTimestamp) return fallback;
+  const d = new Date(isoTimestamp);
+  if (isNaN(d.getTime())) return fallback;
+  if (timezoneMode === 'utc') {
+    return d.toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC',
+    }).replace(/\s+/g, '').toLowerCase();
+  }
+  return d.toLocaleTimeString(undefined, {
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).replace(/\s+/g, '').toLowerCase();
 }
 
 // ── Tabs ──
@@ -92,9 +146,24 @@ document.querySelectorAll('.theme-btn').forEach(btn => {
 });
 applyTheme(localStorage.getItem('wills_theme') || 'dark');
 
-// ═══════════════════════════════════════════════════════════
-//  AUTO SCROLL TO LAST PAST EVENT
-// ═══════════════════════════════════════════════════════════
+// ── Filters ──
+function filterEvents(events) {
+  let filtered = events;
+
+  // Day filter
+  if (dayFilter === 'today') filtered = filtered.filter(e => isToday(e.date));
+  else if (dayFilter === 'tomorrow') filtered = filtered.filter(e => isTomorrow(e.date));
+  else if (dayFilter === 'week') filtered = filtered.filter(e => isThisWeek(e.date));
+
+  // Currency filter
+  if (currencyFilter !== 'all') {
+    filtered = filtered.filter(e => (e.currency || '').toUpperCase() === currencyFilter);
+  }
+
+  return filtered;
+}
+
+// ── Auto-scroll to last past event ──
 function autoScrollToLastPast() {
   if (autoScrollDone) return;
   const tbody = $('tbody');
@@ -114,7 +183,6 @@ function autoScrollToLastPast() {
     const timeText = timeCell.textContent.trim();
     if (!/\d/.test(timeText)) continue;
 
-    // Get the date from the nearest day header above
     let dayLabel = '';
     let prev = row.previousElementSibling;
     while (prev) {
@@ -150,9 +218,7 @@ function autoScrollToLastPast() {
       lastPastRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
       lastPastRow.style.transition = 'background 0.5s ease';
       lastPastRow.style.background = 'rgba(0, 245, 160, 0.14)';
-      setTimeout(() => {
-        lastPastRow.style.background = '';
-      }, 2400);
+      setTimeout(() => { lastPastRow.style.background = ''; }, 2400);
     }, 300);
     autoScrollDone = true;
   }
@@ -161,16 +227,17 @@ function autoScrollToLastPast() {
 // ── Calendar render ──
 function renderCalendar() {
   const tbody = $('tbody');
-  const events = filterByDay(allEvents);
+  const events = filterEvents(allEvents);
 
   if (!events.length) {
     const label = dayFilter === 'today' ? 'today' :
                   dayFilter === 'tomorrow' ? 'tomorrow' :
                   dayFilter === 'week' ? 'this week' : '';
-    tbody.innerHTML = `<tr><td colspan="7" class="empty">No events ${label}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">No events ${label}</td></tr>`;
     return;
   }
 
+  // Sort by timestamp
   const timeSort = t => {
     const s = String(t || '').toLowerCase().trim();
     if (s.includes('all day')) return -1;
@@ -184,6 +251,7 @@ function renderCalendar() {
     return h * 60 + min;
   };
 
+  // Group by date
   const groups = [];
   const seen = new Set();
   for (const e of events) {
@@ -196,22 +264,42 @@ function renderCalendar() {
   let html = '';
   for (const g of groups) {
     const todayTag = isToday(g.date) ? '<span class="today">Today</span>' : '';
-    html += `<tr class="day"><td colspan="7">${esc(g.date)}${todayTag}</td></tr>`;
+    html += `<tr class="day"><td colspan="4">${esc(g.date)}${todayTag}</td></tr>`;
+
     for (const e of g.list) {
       const ik = impactKey(e.impact);
       const bm = (e.beatMiss || '').toLowerCase();
-      let actualCls = 'actual', actualTag = '';
-      if (bm === 'beat') { actualCls += ' beat'; actualTag = '<span class="tag beat">BEAT</span>'; }
-      else if (bm === 'miss') { actualCls += ' miss'; actualTag = '<span class="tag miss">MISS</span>'; }
+      const curFlag = flag(e.currency);
 
-      html += `<tr class="impact-${ik}">
-        <td class="col-time">${esc(e.time || '—')}</td>
-        <td class="col-ccy">${esc(e.currency || '—')}</td>
-        <td class="col-imp"><span class="impact-dot ${ik}"></span><span class="impact-lbl ${ik}">${ik}</span></td>
-        <td class="col-event">${esc(e.event || '')}</td>
-        <td class="col-num ${actualCls}">${esc(e.actual || '—')}${actualTag}</td>
-        <td class="col-num forecast">${esc(e.forecast || '—')}</td>
-        <td class="col-num previous">${esc(e.previous || '—')}</td>
+      // Actual value with beat/miss class
+      let actualCls = 'val-actual';
+      if (bm === 'beat') actualCls += ' beat';
+      else if (bm === 'miss') actualCls += ' miss';
+
+      const hasActual = e.actual && e.actual !== '—';
+      const hasForecast = e.forecast && e.forecast !== '—';
+      const hasPrevious = e.previous && e.previous !== '—';
+
+      // Build values line
+      const vals = [];
+      if (hasActual) vals.push(`<span class="${actualCls}">A ${esc(e.actual)}</span>`);
+      if (hasForecast) vals.push(`<span class="val-forecast">F ${esc(e.forecast)}</span>`);
+      if (hasPrevious) vals.push(`<span class="val-previous">P ${esc(e.previous)}</span>`);
+
+      const countdown = e.timestamp ? formatCountdown(e.timestamp) : '';
+      if (countdown) vals.push(`<span class="countdown">${esc(countdown)}</span>`);
+
+      // Full local time from timestamp
+      const displayTime = e.timestamp ? formatTimeInMode(e.timestamp) : (e.time || '—');
+
+      html += `<tr class="event-row impact-${ik}">
+        <td class="col-time">${esc(displayTime)}</td>
+        <td class="col-ccy"><span class="flag">${curFlag}</span>${esc(e.currency || '—')}</td>
+        <td class="col-imp"><span class="impact-dot ${ik}" title="${ik}"></span></td>
+        <td class="col-event">
+          <div class="ev-name">${esc(e.event || '')}</div>
+          ${vals.length ? `<div class="ev-vals">${vals.join('')}</div>` : ''}
+        </td>
       </tr>`;
     }
   }
@@ -221,7 +309,7 @@ function renderCalendar() {
 }
 
 function renderStats() {
-  const filtered = filterByDay(allEvents);
+  const filtered = filterEvents(allEvents);
   $('statTotal').textContent = filtered.length;
   $('statHigh').textContent = filtered.filter(e => impactKey(e.impact) === 'high').length;
   $('statMedium').textContent = filtered.filter(e => impactKey(e.impact) === 'medium').length;
@@ -267,7 +355,7 @@ async function loadCalendar() {
     renderStats();
     renderCalendar();
   } catch (err) {
-    $('tbody').innerHTML = `<tr><td colspan="7" class="empty">Failed: ${esc(err.message)}</td></tr>`;
+    $('tbody').innerHTML = `<tr><td colspan="4" class="empty">Failed: ${esc(err.message)}</td></tr>`;
   }
 }
 
@@ -287,7 +375,7 @@ async function refreshAll() {
   await Promise.all([loadCalendar(), loadNews()]);
 }
 
-// ── Filters ──
+// ── Filter handlers ──
 document.querySelectorAll('[data-day]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('[data-day]').forEach(b => b.classList.remove('active'));
@@ -296,6 +384,18 @@ document.querySelectorAll('[data-day]').forEach(btn => {
     autoScrollDone = false;
     renderCalendar();
     renderStats();
+  });
+});
+
+document.querySelectorAll('[data-cur]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-cur]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currencyFilter = btn.dataset.cur;
+    autoScrollDone = false;
+    renderCalendar();
+    renderStats();
+    saveCurrencyFilterToProfile();
   });
 });
 
@@ -313,9 +413,36 @@ $('newsSearch').addEventListener('input', e => {
   renderNews();
 });
 
-// ═══════════════════════════════════════════════════════════
-//  AUTH
-// ═══════════════════════════════════════════════════════════
+// ── Save currency filter to profile ──
+let saveFilterTimeout = null;
+function saveCurrencyFilterToProfile() {
+  if (!Auth.isLoggedIn) return;
+  if (saveFilterTimeout) clearTimeout(saveFilterTimeout);
+  saveFilterTimeout = setTimeout(async () => {
+    try {
+      await Auth.updateProfile({ currency_filter: currencyFilter });
+    } catch (e) {
+      console.warn('Could not save currency filter:', e.message);
+    }
+  }, 800);
+}
+
+// ── Timezone toggle ──
+function updateTzButton() {
+  const btn = $('tzToggle');
+  if (!btn) return;
+  btn.textContent = `🌍 ${getShortTimezoneLabel()}`;
+}
+
+$('tzToggle')?.addEventListener('click', () => {
+  timezoneMode = timezoneMode === 'utc' ? 'local' : 'utc';
+  localStorage.setItem('wills_timezone_mode', timezoneMode);
+  updateTzButton();
+  autoScrollDone = false;
+  renderCalendar();
+});
+
+// ── Auth ──
 const authPanel = $('authPanel');
 const authOverlay = $('authOverlay');
 const authArea = $('authArea');
@@ -356,6 +483,7 @@ $('formSignup').addEventListener('submit', async e => {
   try {
     await Auth.signup(username, pin, email);
     renderAuthArea();
+    applyProfilePreferences();
     closeAuth();
   } catch (err) {
     errEl.textContent = err.message; errEl.classList.add('show');
@@ -374,6 +502,7 @@ $('formLogin').addEventListener('submit', async e => {
   try {
     await Auth.login(username, pin);
     renderAuthArea();
+    applyProfilePreferences();
     closeAuth();
   } catch (err) {
     errEl.textContent = err.message; errEl.classList.add('show');
@@ -381,6 +510,23 @@ $('formLogin').addEventListener('submit', async e => {
     btn.disabled = false; btn.textContent = 'Log in';
   }
 });
+
+// ── Apply saved preferences from profile ──
+function applyProfilePreferences() {
+  const p = Auth.profile;
+  if (!p) return;
+
+  // Currency filter
+  const saved = p.currency_filter || 'all';
+  if (saved !== currencyFilter) {
+    currencyFilter = saved;
+    document.querySelectorAll('[data-cur]').forEach(b => {
+      b.classList.toggle('active', b.dataset.cur === saved);
+    });
+    renderCalendar();
+    renderStats();
+  }
+}
 
 function renderAuthArea() {
   if (!Auth.isLoggedIn) {
@@ -411,7 +557,17 @@ function renderAuthArea() {
     if (menu && pill && !menu.contains(e.target) && !pill.contains(e.target)) menu.classList.remove('open');
   });
   $('menuPref').addEventListener('click', () => { $('userMenu').classList.remove('open'); openPrefs(); });
-  $('menuLogout').addEventListener('click', () => { Auth.logout(); renderAuthArea(); });
+  $('menuLogout').addEventListener('click', () => {
+    Auth.logout();
+    renderAuthArea();
+    // Reset filter to default on logout
+    currencyFilter = 'all';
+    document.querySelectorAll('[data-cur]').forEach(b => {
+      b.classList.toggle('active', b.dataset.cur === 'all');
+    });
+    renderCalendar();
+    renderStats();
+  });
 }
 
 // ── Preferences ──
@@ -484,7 +640,7 @@ async function renderPrefs() {
       </select>
     </div>
     <div class="pref-section">
-      <label class="title">Currencies</label>
+      <label class="title">Currencies to alert on</label>
       <div class="chip-grid" id="prefCurrencies">
         ${ALL_CURRENCIES.map(c => `<div class="chip ${currencies.has(c) ? 'active' : ''}" data-val="${c}">${c}</div>`).join('')}
       </div>
@@ -547,8 +703,15 @@ async function renderPrefs() {
 
 // ── Init ──
 (async function init() {
+  if (Auth.isLoggedIn) await Auth.ensureFresh();
+  updateTzButton();
   renderAuthArea();
+  applyProfilePreferences();
   await refreshAll();
   setInterval(refreshAll, 60000);
   setInterval(() => Auth.ensureFresh(), 60000);
+  // Update countdowns every 30 seconds
+  countdownInterval = setInterval(() => {
+    if (dayFilter !== 'all') renderCalendar();
+  }, 30000);
 })();
