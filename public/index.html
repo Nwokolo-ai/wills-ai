@@ -8,7 +8,6 @@
 <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="/styles.css" />
 <style>
-  /* Panels hidden until .open is added */
   #authPanel, #prefPanel, #authOverlay { display: none !important; }
   #authPanel.open, #prefPanel.open, #authOverlay.open { display: block !important; }
 </style>
@@ -34,17 +33,32 @@
 </div>
 
 <div class="panel active" id="panel-calendar">
+
   <div class="day-filter">
-  <button class="day-btn active" data-day="today">Today</button>
-  <button class="day-btn" data-day="tomorrow">Tomorrow</button>
-  <button class="day-btn" data-day="week">This Week</button>
-  <button class="day-btn" data-day="all">All</button>
-  <button class="day-btn" id="tzToggle" style="margin-left:auto;">🌍 UTC</button>
-</div>
+    <button class="day-btn active" data-day="today">Today</button>
+    <button class="day-btn" data-day="tomorrow">Tomorrow</button>
+    <button class="day-btn" data-day="week">This Week</button>
+    <button class="day-btn" data-day="all">All</button>
+    <button class="day-btn tz-btn" id="tzToggle">🌍 UTC</button>
+  </div>
+
+  <div class="currency-filter" id="currencyFilter">
+    <button class="cur-btn active" data-cur="all">All</button>
+    <button class="cur-btn" data-cur="USD">🇺🇸 USD</button>
+    <button class="cur-btn" data-cur="EUR">🇪🇺 EUR</button>
+    <button class="cur-btn" data-cur="GBP">🇬🇧 GBP</button>
+    <button class="cur-btn" data-cur="JPY">🇯🇵 JPY</button>
+    <button class="cur-btn" data-cur="AUD">🇦🇺 AUD</button>
+    <button class="cur-btn" data-cur="NZD">🇳🇿 NZD</button>
+    <button class="cur-btn" data-cur="CAD">🇨🇦 CAD</button>
+    <button class="cur-btn" data-cur="CHF">🇨🇭 CHF</button>
+    <button class="cur-btn" data-cur="CNY">🇨🇳 CNY</button>
+  </div>
+
   <div class="stats">
     <div class="stat"><div class="lbl">Total</div><div class="val" id="statTotal">—</div></div>
-    <div class="stat"><div class="lbl">High Impact</div><div class="val high" id="statHigh">—</div></div>
-    <div class="stat"><div class="lbl">Medium Impact</div><div class="val medium" id="statMedium">—</div></div>
+    <div class="stat"><div class="lbl">High</div><div class="val high" id="statHigh">—</div></div>
+    <div class="stat"><div class="lbl">Medium</div><div class="val medium" id="statMedium">—</div></div>
   </div>
 
   <div class="table-wrap">
@@ -53,15 +67,12 @@
         <tr>
           <th class="col-time">Time</th>
           <th class="col-ccy">CCY</th>
-          <th class="col-imp">Impact</th>
+          <th class="col-imp"></th>
           <th class="col-event">Event</th>
-          <th class="col-num">Actual</th>
-          <th class="col-num">Forecast</th>
-          <th class="col-num">Previous</th>
         </tr>
       </thead>
       <tbody id="tbody">
-        <tr><td colspan="7" class="empty">Loading…</td></tr>
+        <tr><td colspan="4" class="empty">Loading…</td></tr>
       </tbody>
     </table>
   </div>
