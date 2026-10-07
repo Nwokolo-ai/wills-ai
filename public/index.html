@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -8,8 +8,8 @@
 <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="/styles.css" />
 <style>
-  #authPanel, #prefPanel, #authOverlay { display: none !important; }
-  #authPanel.open, #prefPanel.open, #authOverlay.open { display: block !important; }
+  #authPanel, #prefPanel, #authOverlay, #eventModal { display: none !important; }
+  #authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open { display: flex !important; }
 </style>
 </head>
 <body data-theme="dark">
@@ -30,15 +30,21 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="calendar">📅 Calendar</button>
   <button class="tab-btn" data-tab="news">📰 News</button>
+  <span class="last-updated" id="lastUpdated">—</span>
 </div>
 
 <div class="panel active" id="panel-calendar">
+
+  <div class="ad-slot ad-slot-top" id="adTop">
+    <span>Ad space · available</span>
+  </div>
 
   <div class="day-filter">
     <button class="day-btn active" data-day="today">Today</button>
     <button class="day-btn" data-day="tomorrow">Tomorrow</button>
     <button class="day-btn" data-day="week">This Week</button>
     <button class="day-btn" data-day="all">All</button>
+    <button class="day-btn" id="watchlistBtn">⭐ Watchlist</button>
     <button class="day-btn tz-btn" id="tzToggle">🌍 UTC</button>
   </div>
 
@@ -94,8 +100,8 @@
   </div>
 </div>
 
+<!-- AUTH PANEL -->
 <div class="auth-overlay" id="authOverlay"></div>
-
 <aside class="auth-panel" id="authPanel">
   <button class="auth-close" id="authClose" aria-label="Close">✕</button>
 
@@ -144,6 +150,7 @@
   </div>
 </aside>
 
+<!-- PREFERENCES PANEL -->
 <aside class="pref-panel" id="prefPanel">
   <button class="auth-close" id="prefClose" aria-label="Close">✕</button>
   <h2 style="margin-bottom:6px;">Alert preferences</h2>
@@ -152,6 +159,14 @@
     <div class="pref-loading">Loading…</div>
   </div>
 </aside>
+
+<!-- EVENT DETAIL MODAL -->
+<div class="modal-overlay" id="eventModal">
+  <div class="modal-box" id="eventModalBox">
+    <button class="modal-close" id="eventModalClose" aria-label="Close">✕</button>
+    <div id="eventModalContent"></div>
+  </div>
+</div>
 
 <script src="/auth-client.js"></script>
 <script src="/app.js"></script>
