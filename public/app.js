@@ -1,8 +1,13 @@
+// ═══════════════════════════════════════════════════════════
+//  app.js — Will's AI Frontend
+// ═══════════════════════════════════════════════════════════
+
 let allEvents = [];
 let allNews = [];
 let dayFilter = 'today';
 let newsCat = 'all';
 let newsSearch = '';
+let autoScrollDone = false;
 
 const $ = id => document.getElementById(id);
 
@@ -19,7 +24,7 @@ function impactKey(i) {
 
 function parseEventDate(dateStr) {
   if (!dateStr) return null;
-  const clean = String(dateStr).trim().replace(/\s+/g, ' ');
+  const clean = String(dateStr).trim().replace(/\s+/g, ' ').replace(/^[A-Za-z]+,\s*/, '');
   const year = new Date().getFullYear();
   let d = new Date(`${clean} ${year}`);
   if (!isNaN(d.getTime())) return d;
@@ -59,7 +64,7 @@ function filterByDay(events) {
   return events;
 }
 
-// Tabs
+// ── Tabs ──
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -69,20 +74,91 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-// Theme
+// ── Theme ──
 function applyTheme(theme) {
   document.body.dataset.theme = theme;
   document.querySelectorAll('.theme-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.theme === theme);
   });
   localStorage.setItem('wills_theme', theme);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) {
+    const colors = { dark: '#0d1117', light: '#f6f8fa', ocean: '#0a1929', sunset: '#1a0b14' };
+    meta.setAttribute('content', colors[theme] || '#0d1117');
+  }
 }
 document.querySelectorAll('.theme-btn').forEach(btn => {
   btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
 });
 applyTheme(localStorage.getItem('wills_theme') || 'dark');
 
-// Calendar render
+// ═══════════════════════════════════════════════════════════
+//  AUTO SCROLL TO LAST PAST EVENT
+// ═══════════════════════════════════════════════════════════
+function autoScrollToLastPast() {
+  if (autoScrollDone) return;
+  const tbody = $('tbody');
+  if (!tbody) return;
+
+  const now = Date.now();
+  const rows = tbody.querySelectorAll('tr');
+
+  let lastPastRow = null;
+  let lastPastTimestamp = 0;
+
+  for (const row of rows) {
+    if (row.classList.contains('day')) continue;
+    const timeCell = row.querySelector('.col-time');
+    if (!timeCell) continue;
+
+    const timeText = timeCell.textContent.trim();
+    if (!/\d/.test(timeText)) continue;
+
+    // Get the date from the nearest day header above
+    let dayLabel = '';
+    let prev = row.previousElementSibling;
+    while (prev) {
+      if (prev.classList.contains('day')) {
+        dayLabel = prev.textContent.replace('Today', '').trim();
+        break;
+      }
+      prev = prev.previousElementSibling;
+    }
+    if (!dayLabel) continue;
+
+    const parsed = parseEventDate(dayLabel);
+    if (!parsed) continue;
+
+    const m = timeText.match(/(\d+):(\d+)\s*(am|pm)/i);
+    if (!m) continue;
+
+    let h = parseInt(m[1]);
+    const min = parseInt(m[2]);
+    if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+    if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
+    parsed.setHours(h, min, 0, 0);
+
+    const ts = parsed.getTime();
+    if (ts <= now && ts > lastPastTimestamp) {
+      lastPastTimestamp = ts;
+      lastPastRow = row;
+    }
+  }
+
+  if (lastPastRow) {
+    setTimeout(() => {
+      lastPastRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      lastPastRow.style.transition = 'background 0.5s ease';
+      lastPastRow.style.background = 'rgba(0, 245, 160, 0.14)';
+      setTimeout(() => {
+        lastPastRow.style.background = '';
+      }, 2400);
+    }, 300);
+    autoScrollDone = true;
+  }
+}
+
+// ── Calendar render ──
 function renderCalendar() {
   const tbody = $('tbody');
   const events = filterByDay(allEvents);
@@ -140,6 +216,8 @@ function renderCalendar() {
     }
   }
   tbody.innerHTML = html;
+
+  setTimeout(autoScrollToLastPast, 100);
 }
 
 function renderStats() {
@@ -149,7 +227,7 @@ function renderStats() {
   $('statMedium').textContent = filtered.filter(e => impactKey(e.impact) === 'medium').length;
 }
 
-// News render
+// ── News render ──
 function renderNews() {
   const grid = $('newsGrid');
   let items = allNews.slice();
@@ -179,7 +257,7 @@ function renderNews() {
   grid.innerHTML = counter + cards;
 }
 
-// Data loaders
+// ── Data loaders ──
 async function loadCalendar() {
   try {
     const res = await fetch('/api/calendar');
@@ -209,12 +287,13 @@ async function refreshAll() {
   await Promise.all([loadCalendar(), loadNews()]);
 }
 
-// Filters
+// ── Filters ──
 document.querySelectorAll('[data-day]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('[data-day]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     dayFilter = btn.dataset.day;
+    autoScrollDone = false;
     renderCalendar();
     renderStats();
   });
@@ -234,7 +313,9 @@ $('newsSearch').addEventListener('input', e => {
   renderNews();
 });
 
-// Auth
+// ═══════════════════════════════════════════════════════════
+//  AUTH
+// ═══════════════════════════════════════════════════════════
 const authPanel = $('authPanel');
 const authOverlay = $('authOverlay');
 const authArea = $('authArea');
@@ -258,7 +339,9 @@ function showAuthView(view) {
 
 $('authClose').addEventListener('click', closeAuth);
 authOverlay.addEventListener('click', () => { closeAuth(); closePrefs(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeAuth(); closePrefs(); } });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeAuth(); closePrefs(); }
+});
 $('toSignup').addEventListener('click', () => showAuthView('signup'));
 $('toLogin').addEventListener('click', () => showAuthView('login'));
 
@@ -331,7 +414,7 @@ function renderAuthArea() {
   $('menuLogout').addEventListener('click', () => { Auth.logout(); renderAuthArea(); });
 }
 
-// Preferences
+// ── Preferences ──
 function openPrefs() {
   if (!Auth.isLoggedIn) return;
   prefPanel.classList.add('open');
@@ -462,7 +545,7 @@ async function renderPrefs() {
   });
 }
 
-// Init
+// ── Init ──
 (async function init() {
   renderAuthArea();
   await refreshAll();
