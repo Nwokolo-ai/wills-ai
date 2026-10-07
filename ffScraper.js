@@ -1,9 +1,10 @@
 // ═══════════════════════════════════════════════════════════
-//  ffScraper.js — Biquote calendar → Supabase
+//  ffScraper.js — Biquote + Fair Economy merged → Supabase
 //
-//  Startup: fetch full 2-week range → Supabase
-//  Timer: fires 1s after each event, does a FULL refresh again
-//  Detects new actuals and stores them in Supabase
+//  · Biquote: actual values + forecast + previous (major events)
+//  · Fair Economy: broader coverage (smaller countries)
+//  · Merged by date+currency+title
+//  · Full refresh on every event-triggered timer
 // ═══════════════════════════════════════════════════════════
 
 const BiquoteModule = require('biquote');
@@ -13,8 +14,12 @@ const { admin } = require('./db');
 const MODE = process.env.MODE || 'scrape';
 let nextTimer = null;
 
-// Track the previous state of actuals so we can detect when a new one lands
-let previousActuals = new Map(); // event_key -> actual value
+// FF's free CDN (Forex Factory's own calendar feed)
+const FF_THIS_WEEK = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
+const FF_NEXT_WEEK = 'https://nfs.faireconomy.media/ff_calendar_nextweek.json';
+
+// Track previous actuals to detect new ones
+let previousActuals = new Map();
 
 // ────────────────────────────────────────────────────────────
 //  Helpers
@@ -60,19 +65,24 @@ function toTimeString(isoTime) {
   }).toLowerCase().replace(/\s+/g, '');
 }
 
-function makeKey(isoTime, currency, name) {
-  const t = (isoTime || '').toLowerCase();
+// Normalize key for matching across sources
+function makeKey(isoTimeOrDate, timeStr, currency, name) {
+  const t = (isoTimeOrDate || '').toLowerCase();
+  const tm = (timeStr || '').toLowerCase().replace(/\s+/g, '');
   const c = (currency || '').toLowerCase();
   const n = (name || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  return `${t}|${c}|${n}`;
+  return `${t}|${tm}|${c}|${n}`;
 }
 
-function toDbRow(e) {
+// ────────────────────────────────────────────────────────────
+//  BIQUOTE — source of truth for actuals
+// ────────────────────────────────────────────────────────────
+function biquoteToRow(e) {
   const isoTime = e.time || null;
   const name = (e.name || '').trim();
   const currency = (e.currency || '').toUpperCase().trim();
   return {
-    event_key: makeKey(isoTime, currency, name),
+    event_key: makeKey(isoTime, '', currency, name),
     event_date: toIsoDate(isoTime),
     event_time: toTimeString(isoTime),
     event_timestamp: isoTime,
@@ -88,13 +98,118 @@ function toDbRow(e) {
   };
 }
 
+async function fetchBiquote() {
+  const bq = new Biquote();
+  const now = new Date();
+  const from = now.toISOString().slice(0, 10);
+  const to = new Date(now.getTime() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  console.log(`[ff] biquote fetch ${from} → ${to}`);
+  const events = await bq.calendar({ from, to, limit: 500 });
+  if (!Array.isArray(events)) throw new Error('Biquote returned non-array');
+  console.log(`[ff] biquote returned ${events.length}`);
+  return events.map(biquoteToRow);
+}
+
+// ────────────────────────────────────────────────────────────
+//  FAIR ECONOMY (FF CDN) — broader coverage, no actuals
+// ────────────────────────────────────────────────────────────
+function fairEconomyToRow(e) {
+  // FF date format: "Mon Oct 7" + time "1:30pm"
+  const dateStr = e.date || '';
+  const timeStr = e.time || '';
+  const currency = (e.country || '').toUpperCase().trim();
+  const title = (e.title || '').trim();
+
+  // Build ISO timestamp
+  let isoTime = null;
+  if (dateStr && timeStr) {
+    const lowerTime = timeStr.toLowerCase();
+    if (!lowerTime.includes('tentative') && !lowerTime.includes('all day')) {
+      const year = new Date().getFullYear();
+      const d = new Date(`${dateStr} ${year} ${timeStr}`);
+      if (!isNaN(d.getTime())) isoTime = d.toISOString();
+    }
+  }
+
+  return {
+    // Key includes date since FF CDN gives us "Mon Oct 7"
+    event_key: makeKey(dateStr, timeStr, currency, title),
+    event_date: isoTime ? toIsoDate(isoTime) : null,
+    event_time: isoTime ? toTimeString(isoTime) : timeStr,
+    event_timestamp: isoTime,
+    currency,
+    impact: normalizeImpact(e.impact),
+    title,
+    actual: e.actual || null,
+    forecast: e.forecast || null,
+    previous: e.previous || null,
+    beat_miss: beatMiss(e.actual, e.forecast),
+    source: 'fair_economy',
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function fetchFairEconomy() {
+  console.log('[ff] fair economy fetch');
+  const [thisWeek, nextWeek] = await Promise.all([
+    fetch(FF_THIS_WEEK).then(r => r.ok ? r.json() : []),
+    fetch(FF_NEXT_WEEK).then(r => r.ok ? r.json() : []),
+  ]);
+  const all = [...thisWeek, ...nextWeek];
+  console.log(`[ff] fair economy returned ${all.length}`);
+  return all.map(fairEconomyToRow);
+}
+
+// ────────────────────────────────────────────────────────────
+//  MERGE — Biquote wins for actuals, Fair Economy fills gaps
+// ────────────────────────────────────────────────────────────
+function mergeSources(biquoteRows, feRows) {
+  // Build lookup by (date+currency+title) — ignore time differences
+  const byDayKey = new Map();
+
+  function dayKey(row) {
+    const d = (row.event_date || '').toLowerCase();
+    const c = (row.currency || '').toLowerCase();
+    const t = (row.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    return `${d}|${c}|${t}`;
+  }
+
+  // Start with Fair Economy (broader coverage)
+  for (const row of feRows) {
+    if (!row.event_date || !row.currency || !row.title) continue;
+    const k = dayKey(row);
+    byDayKey.set(k, { ...row });
+  }
+
+  // Overlay Biquote (has actuals, more precise time)
+  for (const row of biquoteRows) {
+    if (!row.event_date || !row.currency || !row.title) continue;
+    const k = dayKey(row);
+    const existing = byDayKey.get(k);
+    if (existing) {
+      // Biquote wins — has better data
+      existing.actual = row.actual || existing.actual;
+      existing.forecast = row.forecast || existing.forecast;
+      existing.previous = row.previous || existing.previous;
+      existing.beat_miss = row.beat_miss || existing.beat_miss;
+      existing.event_time = row.event_time || existing.event_time;
+      existing.event_timestamp = row.event_timestamp || existing.event_timestamp;
+      existing.event_key = row.event_key; // use Biquote's key
+      existing.source = 'biquote+fe';
+    } else {
+      byDayKey.set(k, { ...row });
+    }
+  }
+
+  return [...byDayKey.values()];
+}
+
 function validateRows(rows) {
   return rows.filter(r => {
-    if (!r.event_key || r.event_key.length < 8) return false;
+    if (!r.event_key || r.event_key.length < 5) return false;
     if (!r.event_date) return false;
-    if (!r.currency || r.currency.length < 3) return false;
+    if (!r.currency || r.currency.length < 2) return false;
     if (!r.title || r.title.length < 2) return false;
-    if (!/^[A-Z]{2,4}$/.test(r.currency) && r.currency !== 'ALL') return false;
     return true;
   });
 }
@@ -115,37 +230,18 @@ async function pushToSupabase(rows) {
 }
 
 // ────────────────────────────────────────────────────────────
-//  FULL FETCH — 2 weeks ahead
-// ────────────────────────────────────────────────────────────
-async function fetchFullRange() {
-  const bq = new Biquote();
-  const now = new Date();
-  const from = now.toISOString().slice(0, 10);
-  const to = new Date(now.getTime() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  console.log(`[ff] FULL fetch ${from} → ${to}`);
-  const events = await bq.calendar({ from, to, limit: 500 });
-  if (!Array.isArray(events)) throw new Error('Biquote returned non-array');
-  console.log(`[ff] biquote returned ${events.length} events`);
-  return events;
-}
-
-// ────────────────────────────────────────────────────────────
-//  Detect newly-arrived actuals
+//  Detect newly-arrived actuals (for post-event notifications)
 // ────────────────────────────────────────────────────────────
 function detectNewActuals(rows) {
   const fresh = [];
   for (const row of rows) {
     const previous = previousActuals.get(row.event_key);
-    // New actual that wasn't there before
     if (row.actual && !previous) {
       fresh.push(row);
-    }
-    // Actual changed from one value to another (rare, but happens with revisions)
-    else if (row.actual && previous && row.actual !== previous) {
+    } else if (row.actual && previous && row.actual !== previous) {
       fresh.push({ ...row, revised: true });
     }
   }
-  // Update the snapshot for next time
   for (const row of rows) {
     if (row.actual) previousActuals.set(row.event_key, row.actual);
   }
@@ -153,39 +249,40 @@ function detectNewActuals(rows) {
 }
 
 // ────────────────────────────────────────────────────────────
-//  MAIN SCRAPE — full refresh on every call
+//  MAIN SCRAPE
 // ────────────────────────────────────────────────────────────
 async function scrape() {
   if (MODE === 'read') {
-    console.log('[ff] MODE=read — skipping');
+    console.log('[ff] MODE=read — skip');
     return { skipped: true };
   }
 
   const t0 = Date.now();
   try {
-    const events = await fetchFullRange();
-    if (!events.length) {
-      console.warn('[ff] no events returned');
-      scheduleNextEventRefresh();
-      return;
-    }
+    // Fetch both in parallel
+    const [biquoteRows, feRows] = await Promise.all([
+      fetchBiquote().catch(err => {
+        console.error('[ff] biquote failed:', err.message);
+        return [];
+      }),
+      fetchFairEconomy().catch(err => {
+        console.error('[ff] fair economy failed:', err.message);
+        return [];
+      }),
+    ]);
 
-    const allRows = events.map(toDbRow);
-    const deduped = [...new Map(allRows.map(r => [r.event_key, r])).values()];
-    const validRows = validateRows(deduped);
+    const merged = mergeSources(biquoteRows, feRows);
+    const valid = validateRows(merged);
 
-    console.log(`[ff] ${validRows.length} valid rows`);
+    console.log(`[ff] merged: ${biquoteRows.length} biquote + ${feRows.length} FE = ${valid.length} unique`);
 
-    // Detect new actuals BEFORE saving (compare against previous snapshot)
-    const newActuals = detectNewActuals(validRows);
+    const newActuals = detectNewActuals(valid);
 
-    // Save to Supabase
-    await pushToSupabase(validRows);
+    await pushToSupabase(valid);
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
-    console.log(`[ff] pushed ${validRows.length} events — ${elapsed}s`);
+    console.log(`[ff] pushed ${valid.length} events — ${elapsed}s`);
 
-    // If any new actuals appeared, notify
     if (newActuals.length) {
       console.log(`[ff] ${newActuals.length} new actuals detected`);
       try {
@@ -199,14 +296,13 @@ async function scrape() {
     scheduleNextEventRefresh();
   } catch (err) {
     console.error('[ff] error:', err.message);
-    // On failure, retry in 5 min
     if (nextTimer) clearTimeout(nextTimer);
     nextTimer = setTimeout(scrape, 5 * 60 * 1000);
   }
 }
 
 // ────────────────────────────────────────────────────────────
-//  Schedule the next refresh — 1s after the next event
+//  Next event timer
 // ────────────────────────────────────────────────────────────
 async function scheduleNextEventRefresh() {
   if (nextTimer) clearTimeout(nextTimer);
@@ -232,36 +328,27 @@ async function scheduleNextEventRefresh() {
     const delay = targetMs - Date.now();
 
     if (delay < 0) {
-      console.log('[ff] next event already passed — retrying in 10s');
       nextTimer = setTimeout(scrape, 10000);
       return;
     }
 
-    // Cap delay at 6 hours (safety net)
-    const cappedDelay = Math.min(delay, 6 * 3600 * 1000);
-    const minUntil = Math.round(cappedDelay / 60000);
+    const capped = Math.min(delay, 6 * 3600 * 1000);
+    const minUntil = Math.round(capped / 60000);
     console.log(`[ff] next refresh for ${next.currency} ${next.title} in ${minUntil} min`);
 
     nextTimer = setTimeout(async () => {
-      console.log('[ff] TIMER fired — refreshing full range');
+      console.log('[ff] TIMER fired — full refresh');
       await scrape();
-    }, cappedDelay);
+    }, capped);
   } catch (err) {
     console.error('[ff] schedule error:', err.message);
   }
 }
 
-// ────────────────────────────────────────────────────────────
-//  Cleanup — remove events older than 7 days
-// ────────────────────────────────────────────────────────────
 async function cleanup() {
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   await admin.from('calendar_events').delete().lt('event_date', cutoff);
-  console.log(`[ff] cleanup: removed events before ${cutoff}`);
+  console.log(`[ff] cleanup done`);
 }
 
-module.exports = {
-  scrape,
-  cleanup,
-  scheduleNextEventRefresh,
-};
+module.exports = { scrape, cleanup, scheduleNextEventRefresh };
