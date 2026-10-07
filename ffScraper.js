@@ -1,3 +1,11 @@
+// ═══════════════════════════════════════════════════════════
+//  ffScraper.js — Biquote calendar → Supabase
+//
+//  Startup: fetch full 2-week range → Supabase
+//  Timer: fires 1s after each event, does a FULL refresh again
+//  Detects new actuals and stores them in Supabase
+// ═══════════════════════════════════════════════════════════
+
 const BiquoteModule = require('biquote');
 const Biquote = BiquoteModule.Biquote || BiquoteModule.default || BiquoteModule;
 const { admin } = require('./db');
@@ -5,6 +13,12 @@ const { admin } = require('./db');
 const MODE = process.env.MODE || 'scrape';
 let nextTimer = null;
 
+// Track the previous state of actuals so we can detect when a new one lands
+let previousActuals = new Map(); // event_key -> actual value
+
+// ────────────────────────────────────────────────────────────
+//  Helpers
+// ────────────────────────────────────────────────────────────
 function parseNumber(v) {
   if (v == null || v === '') return null;
   const s = String(v).replace(/[^\d.\-]/g, '');
@@ -91,14 +105,18 @@ async function pushToSupabase(rows) {
   let total = 0;
   for (let i = 0; i < rows.length; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
-    const { error } = await admin.from('calendar_events').upsert(batch, { onConflict: 'event_key' });
+    const { error } = await admin
+      .from('calendar_events')
+      .upsert(batch, { onConflict: 'event_key' });
     if (error) throw new Error('Upsert failed: ' + error.message);
     total += batch.length;
   }
   return total;
 }
 
-// ── Full fetch (startup only) — gets the next 2 weeks ──
+// ────────────────────────────────────────────────────────────
+//  FULL FETCH — 2 weeks ahead
+// ────────────────────────────────────────────────────────────
 async function fetchFullRange() {
   const bq = new Biquote();
   const now = new Date();
@@ -106,70 +124,90 @@ async function fetchFullRange() {
   const to = new Date(now.getTime() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   console.log(`[ff] FULL fetch ${from} → ${to}`);
   const events = await bq.calendar({ from, to, limit: 500 });
-  if (!Array.isArray(events)) throw new Error('non-array');
-  console.log(`[ff] full returned ${events.length} events`);
+  if (!Array.isArray(events)) throw new Error('Biquote returned non-array');
+  console.log(`[ff] biquote returned ${events.length} events`);
   return events;
 }
 
-// ── Today-only fetch (per-event refresh) — small, fast ──
-async function fetchToday() {
-  const bq = new Biquote();
-  const today = new Date().toISOString().slice(0, 10);
-  console.log(`[ff] TODAY fetch ${today}`);
-  const events = await bq.calendar({ from: today, to: today, limit: 100 });
-  if (!Array.isArray(events)) throw new Error('non-array');
-  console.log(`[ff] today returned ${events.length} events`);
-  return events;
+// ────────────────────────────────────────────────────────────
+//  Detect newly-arrived actuals
+// ────────────────────────────────────────────────────────────
+function detectNewActuals(rows) {
+  const fresh = [];
+  for (const row of rows) {
+    const previous = previousActuals.get(row.event_key);
+    // New actual that wasn't there before
+    if (row.actual && !previous) {
+      fresh.push(row);
+    }
+    // Actual changed from one value to another (rare, but happens with revisions)
+    else if (row.actual && previous && row.actual !== previous) {
+      fresh.push({ ...row, revised: true });
+    }
+  }
+  // Update the snapshot for next time
+  for (const row of rows) {
+    if (row.actual) previousActuals.set(row.event_key, row.actual);
+  }
+  return fresh;
 }
 
-async function scrapeFull() {
-  if (MODE === 'read') return;
+// ────────────────────────────────────────────────────────────
+//  MAIN SCRAPE — full refresh on every call
+// ────────────────────────────────────────────────────────────
+async function scrape() {
+  if (MODE === 'read') {
+    console.log('[ff] MODE=read — skipping');
+    return { skipped: true };
+  }
+
   const t0 = Date.now();
   try {
     const events = await fetchFullRange();
-    if (!events.length) return;
+    if (!events.length) {
+      console.warn('[ff] no events returned');
+      scheduleNextEventRefresh();
+      return;
+    }
 
     const allRows = events.map(toDbRow);
     const deduped = [...new Map(allRows.map(r => [r.event_key, r])).values()];
-    const valid = validateRows(deduped);
+    const validRows = validateRows(deduped);
 
-    console.log(`[ff] full: ${valid.length} valid rows`);
-    await pushToSupabase(valid);
+    console.log(`[ff] ${validRows.length} valid rows`);
+
+    // Detect new actuals BEFORE saving (compare against previous snapshot)
+    const newActuals = detectNewActuals(validRows);
+
+    // Save to Supabase
+    await pushToSupabase(validRows);
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
-    console.log(`[ff] full pushed ${valid.length} — ${elapsed}s`);
+    console.log(`[ff] pushed ${validRows.length} events — ${elapsed}s`);
+
+    // If any new actuals appeared, notify
+    if (newActuals.length) {
+      console.log(`[ff] ${newActuals.length} new actuals detected`);
+      try {
+        const { notifyNewActuals } = require('./alerts');
+        if (notifyNewActuals) await notifyNewActuals(newActuals);
+      } catch (e) {
+        console.error('[ff] notify failed:', e.message);
+      }
+    }
 
     scheduleNextEventRefresh();
   } catch (err) {
-    console.error('[ff] full error:', err.message);
-    scheduleNextEventRefresh();
+    console.error('[ff] error:', err.message);
+    // On failure, retry in 5 min
+    if (nextTimer) clearTimeout(nextTimer);
+    nextTimer = setTimeout(scrape, 5 * 60 * 1000);
   }
 }
 
-async function scrapeToday() {
-  if (MODE === 'read') return;
-  const t0 = Date.now();
-  try {
-    const events = await fetchToday();
-    if (!events.length) return;
-
-    const allRows = events.map(toDbRow);
-    const deduped = [...new Map(allRows.map(r => [r.event_key, r])).values()];
-    const valid = validateRows(deduped);
-
-    const withActual = valid.filter(r => r.actual).length;
-    console.log(`[ff] today: ${valid.length} rows (${withActual} with actual)`);
-    await pushToSupabase(valid);
-
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
-    console.log(`[ff] today pushed ${valid.length} — ${elapsed}s`);
-  } catch (err) {
-    console.error('[ff] today error:', err.message);
-  }
-  scheduleNextEventRefresh();
-}
-
-// ── Schedule the next refresh: 1 second after the next event ──
+// ────────────────────────────────────────────────────────────
+//  Schedule the next refresh — 1s after the next event
+// ────────────────────────────────────────────────────────────
 async function scheduleNextEventRefresh() {
   if (nextTimer) clearTimeout(nextTimer);
   if (MODE === 'read') return;
@@ -184,8 +222,8 @@ async function scheduleNextEventRefresh() {
       .limit(1);
 
     if (!data?.length) {
-      console.log('[ff] no upcoming events — scheduling full refresh in 6h');
-      nextTimer = setTimeout(scrapeFull, 6 * 3600 * 1000);
+      console.log('[ff] no upcoming events — checking again in 6h');
+      nextTimer = setTimeout(scrape, 6 * 3600 * 1000);
       return;
     }
 
@@ -194,32 +232,36 @@ async function scheduleNextEventRefresh() {
     const delay = targetMs - Date.now();
 
     if (delay < 0) {
-      console.log('[ff] event in the past — retrying in 10s');
-      nextTimer = setTimeout(scrapeToday, 10000);
+      console.log('[ff] next event already passed — retrying in 10s');
+      nextTimer = setTimeout(scrape, 10000);
       return;
     }
 
-    const minUntil = Math.round(delay / 60000);
+    // Cap delay at 6 hours (safety net)
+    const cappedDelay = Math.min(delay, 6 * 3600 * 1000);
+    const minUntil = Math.round(cappedDelay / 60000);
     console.log(`[ff] next refresh for ${next.currency} ${next.title} in ${minUntil} min`);
 
     nextTimer = setTimeout(async () => {
-      console.log('[ff] TIMER fired — fetching today to grab actual');
-      await scrapeToday();
-    }, delay);
+      console.log('[ff] TIMER fired — refreshing full range');
+      await scrape();
+    }, cappedDelay);
   } catch (err) {
     console.error('[ff] schedule error:', err.message);
   }
 }
 
-// Backward compat — server.js calls scrape()
-async function scrape() {
-  return scrapeFull();
-}
-
+// ────────────────────────────────────────────────────────────
+//  Cleanup — remove events older than 7 days
+// ────────────────────────────────────────────────────────────
 async function cleanup() {
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   await admin.from('calendar_events').delete().lt('event_date', cutoff);
-  console.log(`[ff] cleanup removed events before ${cutoff}`);
+  console.log(`[ff] cleanup: removed events before ${cutoff}`);
 }
 
-module.exports = { scrape, scrapeFull, scrapeToday, cleanup, scheduleNextEventRefresh };
+module.exports = {
+  scrape,
+  cleanup,
+  scheduleNextEventRefresh,
+};
