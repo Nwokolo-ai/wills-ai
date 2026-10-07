@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════
-//  ffScraper.js — Biquote calendar → Supabase
+//  ffScraper.js — Biquote → Supabase
 //
-//  Startup: fetch full 2-week range → Supabase
-//  Timer: fires 1s after each event, does a FULL refresh again
-//  Detects new actuals and stores them in Supabase
+//  · Startup: fetch full 2-week range → Supabase
+//  · Timer: fires 1s after each event, does a FULL refresh
+//  · Detects new actuals and notifies via alerts.js
 // ═══════════════════════════════════════════════════════════
 
 const BiquoteModule = require('biquote');
@@ -13,8 +13,8 @@ const { admin } = require('./db');
 const MODE = process.env.MODE || 'scrape';
 let nextTimer = null;
 
-// Track the previous state of actuals so we can detect when a new one lands
-let previousActuals = new Map(); // event_key -> actual value
+// Track previous actuals to detect new arrivals
+let previousActuals = new Map();
 
 // ────────────────────────────────────────────────────────────
 //  Helpers
@@ -115,37 +115,33 @@ async function pushToSupabase(rows) {
 }
 
 // ────────────────────────────────────────────────────────────
-//  FULL FETCH — 2 weeks ahead
+//  Biquote fetch — 2 weeks ahead
 // ────────────────────────────────────────────────────────────
-async function fetchFullRange() {
+async function fetchBiquote() {
   const bq = new Biquote();
   const now = new Date();
   const from = now.toISOString().slice(0, 10);
   const to = new Date(now.getTime() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  console.log(`[ff] FULL fetch ${from} → ${to}`);
+  console.log(`[ff] biquote fetch ${from} → ${to}`);
   const events = await bq.calendar({ from, to, limit: 500 });
   if (!Array.isArray(events)) throw new Error('Biquote returned non-array');
-  console.log(`[ff] biquote returned ${events.length} events`);
-  return events;
+  console.log(`[ff] biquote returned ${events.length}`);
+  return events.map(toDbRow);
 }
 
 // ────────────────────────────────────────────────────────────
-//  Detect newly-arrived actuals
+//  Detect newly-arrived actuals (for post-event notifications)
 // ────────────────────────────────────────────────────────────
 function detectNewActuals(rows) {
   const fresh = [];
   for (const row of rows) {
     const previous = previousActuals.get(row.event_key);
-    // New actual that wasn't there before
     if (row.actual && !previous) {
       fresh.push(row);
-    }
-    // Actual changed from one value to another (rare, but happens with revisions)
-    else if (row.actual && previous && row.actual !== previous) {
+    } else if (row.actual && previous && row.actual !== previous) {
       fresh.push({ ...row, revised: true });
     }
   }
-  // Update the snapshot for next time
   for (const row of rows) {
     if (row.actual) previousActuals.set(row.event_key, row.actual);
   }
@@ -153,39 +149,35 @@ function detectNewActuals(rows) {
 }
 
 // ────────────────────────────────────────────────────────────
-//  MAIN SCRAPE — full refresh on every call
+//  MAIN SCRAPE
 // ────────────────────────────────────────────────────────────
 async function scrape() {
   if (MODE === 'read') {
-    console.log('[ff] MODE=read — skipping');
+    console.log('[ff] MODE=read — skip');
     return { skipped: true };
   }
 
   const t0 = Date.now();
   try {
-    const events = await fetchFullRange();
-    if (!events.length) {
-      console.warn('[ff] no events returned');
+    const allRows = await fetchBiquote();
+    if (!allRows.length) {
+      console.warn('[ff] no events');
       scheduleNextEventRefresh();
       return;
     }
 
-    const allRows = events.map(toDbRow);
     const deduped = [...new Map(allRows.map(r => [r.event_key, r])).values()];
-    const validRows = validateRows(deduped);
+    const valid = validateRows(deduped);
 
-    console.log(`[ff] ${validRows.length} valid rows`);
+    console.log(`[ff] ${valid.length} valid rows`);
 
-    // Detect new actuals BEFORE saving (compare against previous snapshot)
-    const newActuals = detectNewActuals(validRows);
+    const newActuals = detectNewActuals(valid);
 
-    // Save to Supabase
-    await pushToSupabase(validRows);
+    await pushToSupabase(valid);
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
-    console.log(`[ff] pushed ${validRows.length} events — ${elapsed}s`);
+    console.log(`[ff] pushed ${valid.length} events — ${elapsed}s`);
 
-    // If any new actuals appeared, notify
     if (newActuals.length) {
       console.log(`[ff] ${newActuals.length} new actuals detected`);
       try {
@@ -199,14 +191,13 @@ async function scrape() {
     scheduleNextEventRefresh();
   } catch (err) {
     console.error('[ff] error:', err.message);
-    // On failure, retry in 5 min
     if (nextTimer) clearTimeout(nextTimer);
     nextTimer = setTimeout(scrape, 5 * 60 * 1000);
   }
 }
 
 // ────────────────────────────────────────────────────────────
-//  Schedule the next refresh — 1s after the next event
+//  Next event timer
 // ────────────────────────────────────────────────────────────
 async function scheduleNextEventRefresh() {
   if (nextTimer) clearTimeout(nextTimer);
@@ -232,36 +223,27 @@ async function scheduleNextEventRefresh() {
     const delay = targetMs - Date.now();
 
     if (delay < 0) {
-      console.log('[ff] next event already passed — retrying in 10s');
       nextTimer = setTimeout(scrape, 10000);
       return;
     }
 
-    // Cap delay at 6 hours (safety net)
-    const cappedDelay = Math.min(delay, 6 * 3600 * 1000);
-    const minUntil = Math.round(cappedDelay / 60000);
+    const capped = Math.min(delay, 6 * 3600 * 1000);
+    const minUntil = Math.round(capped / 60000);
     console.log(`[ff] next refresh for ${next.currency} ${next.title} in ${minUntil} min`);
 
     nextTimer = setTimeout(async () => {
-      console.log('[ff] TIMER fired — refreshing full range');
+      console.log('[ff] TIMER fired — full refresh');
       await scrape();
-    }, cappedDelay);
+    }, capped);
   } catch (err) {
     console.error('[ff] schedule error:', err.message);
   }
 }
 
-// ────────────────────────────────────────────────────────────
-//  Cleanup — remove events older than 7 days
-// ────────────────────────────────────────────────────────────
 async function cleanup() {
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   await admin.from('calendar_events').delete().lt('event_date', cutoff);
-  console.log(`[ff] cleanup: removed events before ${cutoff}`);
+  console.log('[ff] cleanup done');
 }
 
-module.exports = {
-  scrape,
-  cleanup,
-  scheduleNextEventRefresh,
-};
+module.exports = { scrape, cleanup, scheduleNextEventRefresh };
