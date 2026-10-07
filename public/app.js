@@ -6,26 +6,23 @@ let allEvents = [];
 let allNews = [];
 let dayFilter = 'today';
 let currencyFilter = 'all';
+let watchlistOnly = false;
 let newsCat = 'all';
 let newsSearch = '';
 let timezoneMode = localStorage.getItem('wills_timezone_mode') || 'utc';
+let watchlist = [];
 let autoScrollDone = false;
-let countdownInterval = null;
+let lastLoadedAt = null;
 
 const $ = id => document.getElementById(id);
 
-// ── Currency flags ──
 const FLAGS = {
   USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵',
   AUD: '🇦🇺', NZD: '🇳🇿', CAD: '🇨🇦', CHF: '🇨🇭',
   CNY: '🇨🇳', ALL: '🌐',
 };
+function flag(code) { return FLAGS[(code || '').toUpperCase()] || '🏳️'; }
 
-function flag(code) {
-  return FLAGS[(code || '').toUpperCase()] || '🏳️';
-}
-
-// ── Helpers ──
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -72,7 +69,6 @@ function isThisWeek(s) {
   return d >= start && d < end;
 }
 
-// ── Countdown formatter ──
 function formatCountdown(isoTimestamp) {
   if (!isoTimestamp) return '';
   const d = new Date(isoTimestamp);
@@ -80,21 +76,17 @@ function formatCountdown(isoTimestamp) {
   const diffMs = d.getTime() - Date.now();
   const past = diffMs < 0;
   const abs = Math.abs(diffMs);
-
   const totalMin = Math.floor(abs / 60000);
   const days = Math.floor(totalMin / 1440);
   const hours = Math.floor((totalMin % 1440) / 60);
   const mins = totalMin % 60;
-
   let text;
   if (days > 0) text = `${days}d ${hours}h`;
   else if (hours > 0) text = `${hours}h ${mins}m`;
   else text = `${mins}m`;
-
   return past ? `${text} ago` : `in ${text}`;
 }
 
-// ── Timezone helpers ──
 function getShortTimezoneLabel() {
   if (timezoneMode === 'utc') return 'UTC';
   try {
@@ -116,6 +108,20 @@ function formatTimeInMode(isoTimestamp, fallback = '—') {
   return d.toLocaleTimeString(undefined, {
     hour: 'numeric', minute: '2-digit', hour12: true,
   }).replace(/\s+/g, '').toLowerCase();
+}
+
+function formatDateInMode(isoTimestamp, fallback = '') {
+  if (!isoTimestamp) return fallback;
+  const d = new Date(isoTimestamp);
+  if (isNaN(d.getTime())) return fallback;
+  if (timezoneMode === 'utc') {
+    return d.toLocaleDateString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
+    });
+  }
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
 }
 
 // ── Tabs ──
@@ -146,20 +152,23 @@ document.querySelectorAll('.theme-btn').forEach(btn => {
 });
 applyTheme(localStorage.getItem('wills_theme') || 'dark');
 
-// ── Filters ──
+// ── Event key for watchlist ──
+function eventKey(e) {
+  return `${e.date}|${e.time}|${e.currency}|${e.event}`;
+}
+
+// ── Filter ──
 function filterEvents(events) {
   let filtered = events;
-
-  // Day filter
   if (dayFilter === 'today') filtered = filtered.filter(e => isToday(e.date));
   else if (dayFilter === 'tomorrow') filtered = filtered.filter(e => isTomorrow(e.date));
   else if (dayFilter === 'week') filtered = filtered.filter(e => isThisWeek(e.date));
-
-  // Currency filter
   if (currencyFilter !== 'all') {
     filtered = filtered.filter(e => (e.currency || '').toUpperCase() === currencyFilter);
   }
-
+  if (watchlistOnly) {
+    filtered = filtered.filter(e => watchlist.includes(eventKey(e)));
+  }
   return filtered;
 }
 
@@ -168,21 +177,16 @@ function autoScrollToLastPast() {
   if (autoScrollDone) return;
   const tbody = $('tbody');
   if (!tbody) return;
-
   const now = Date.now();
   const rows = tbody.querySelectorAll('tr');
-
   let lastPastRow = null;
   let lastPastTimestamp = 0;
-
   for (const row of rows) {
     if (row.classList.contains('day')) continue;
     const timeCell = row.querySelector('.col-time');
     if (!timeCell) continue;
-
     const timeText = timeCell.textContent.trim();
     if (!/\d/.test(timeText)) continue;
-
     let dayLabel = '';
     let prev = row.previousElementSibling;
     while (prev) {
@@ -193,26 +197,21 @@ function autoScrollToLastPast() {
       prev = prev.previousElementSibling;
     }
     if (!dayLabel) continue;
-
     const parsed = parseEventDate(dayLabel);
     if (!parsed) continue;
-
     const m = timeText.match(/(\d+):(\d+)\s*(am|pm)/i);
     if (!m) continue;
-
     let h = parseInt(m[1]);
     const min = parseInt(m[2]);
     if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
     if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
     parsed.setHours(h, min, 0, 0);
-
     const ts = parsed.getTime();
     if (ts <= now && ts > lastPastTimestamp) {
       lastPastTimestamp = ts;
       lastPastRow = row;
     }
   }
-
   if (lastPastRow) {
     setTimeout(() => {
       lastPastRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -230,14 +229,15 @@ function renderCalendar() {
   const events = filterEvents(allEvents);
 
   if (!events.length) {
-    const label = dayFilter === 'today' ? 'today' :
-                  dayFilter === 'tomorrow' ? 'tomorrow' :
-                  dayFilter === 'week' ? 'this week' : '';
+    let label = '';
+    if (watchlistOnly) label = 'in your watchlist';
+    else if (dayFilter === 'today') label = 'today';
+    else if (dayFilter === 'tomorrow') label = 'tomorrow';
+    else if (dayFilter === 'week') label = 'this week';
     tbody.innerHTML = `<tr><td colspan="4" class="empty">No events ${label}</td></tr>`;
     return;
   }
 
-  // Sort by timestamp
   const timeSort = t => {
     const s = String(t || '').toLowerCase().trim();
     if (s.includes('all day')) return -1;
@@ -251,7 +251,6 @@ function renderCalendar() {
     return h * 60 + min;
   };
 
-  // Group by date
   const groups = [];
   const seen = new Set();
   for (const e of events) {
@@ -270,40 +269,44 @@ function renderCalendar() {
       const ik = impactKey(e.impact);
       const bm = (e.beatMiss || '').toLowerCase();
       const curFlag = flag(e.currency);
+      const key = eventKey(e);
+      const starred = watchlist.includes(key);
 
-      // Actual value with beat/miss class
       let actualCls = 'val-actual';
       if (bm === 'beat') actualCls += ' beat';
       else if (bm === 'miss') actualCls += ' miss';
 
-      const hasActual = e.actual && e.actual !== '—';
-      const hasForecast = e.forecast && e.forecast !== '—';
-      const hasPrevious = e.previous && e.previous !== '—';
-
-      // Build values line
       const vals = [];
-      if (hasActual) vals.push(`<span class="${actualCls}">A ${esc(e.actual)}</span>`);
-      if (hasForecast) vals.push(`<span class="val-forecast">F ${esc(e.forecast)}</span>`);
-      if (hasPrevious) vals.push(`<span class="val-previous">P ${esc(e.previous)}</span>`);
-
+      if (e.actual && e.actual !== '—') vals.push(`<span class="${actualCls}">A ${esc(e.actual)}</span>`);
+      if (e.forecast && e.forecast !== '—') vals.push(`<span class="val-forecast">F ${esc(e.forecast)}</span>`);
+      if (e.previous && e.previous !== '—') vals.push(`<span class="val-previous">P ${esc(e.previous)}</span>`);
       const countdown = e.timestamp ? formatCountdown(e.timestamp) : '';
       if (countdown) vals.push(`<span class="countdown">${esc(countdown)}</span>`);
 
-      // Full local time from timestamp
       const displayTime = e.timestamp ? formatTimeInMode(e.timestamp) : (e.time || '—');
+      const starHTML = starred ? '<span class="star-icon">⭐</span>' : '';
 
-      html += `<tr class="event-row impact-${ik}">
+      html += `<tr class="event-row impact-${ik}${starred ? ' starred' : ''}" data-key="${esc(key)}">
         <td class="col-time">${esc(displayTime)}</td>
         <td class="col-ccy"><span class="flag">${curFlag}</span>${esc(e.currency || '—')}</td>
-        <td class="col-imp"><span class="impact-dot ${ik}" title="${ik}"></span></td>
+        <td class="col-imp"><span class="impact-dot ${ik}"></span></td>
         <td class="col-event">
-          <div class="ev-name">${esc(e.event || '')}</div>
+          <div class="ev-name">${starHTML}${esc(e.event || '')}</div>
           ${vals.length ? `<div class="ev-vals">${vals.join('')}</div>` : ''}
         </td>
       </tr>`;
     }
   }
   tbody.innerHTML = html;
+
+  // Attach click handlers
+  tbody.querySelectorAll('tr.event-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const key = row.dataset.key;
+      const ev = allEvents.find(e => eventKey(e) === key);
+      if (ev) openEventModal(ev);
+    });
+  });
 
   setTimeout(autoScrollToLastPast, 100);
 }
@@ -315,7 +318,17 @@ function renderStats() {
   $('statMedium').textContent = filtered.filter(e => impactKey(e.impact) === 'medium').length;
 }
 
-// ── News render ──
+// ── Last updated ──
+function updateLastUpdated() {
+  const el = $('lastUpdated');
+  if (!el || !lastLoadedAt) return;
+  const seconds = Math.floor((Date.now() - lastLoadedAt) / 1000);
+  if (seconds < 60) el.textContent = `⚡ live`;
+  else if (seconds < 3600) el.textContent = `${Math.floor(seconds/60)}m ago`;
+  else el.textContent = `${Math.floor(seconds/3600)}h ago`;
+}
+
+// ── News render (with ad injection) ──
 function renderNews() {
   const grid = $('newsGrid');
   let items = allNews.slice();
@@ -328,21 +341,28 @@ function renderNews() {
     grid.innerHTML = '<div class="empty">No news match</div>';
     return;
   }
+
   const counter = `<div class="news-counter">Showing ${items.length} of ${allNews.length} articles</div>`;
-  const cards = items.map(n => {
+  const cards = [];
+  items.forEach((n, i) => {
     const date = n.pubDate ? new Date(n.pubDate).toLocaleString('en-GB', {
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
     }) : '';
-    return `<div class="news-card">
+    cards.push(`<div class="news-card">
       <h3><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a></h3>
       ${n.snippet ? `<p>${esc(n.snippet)}</p>` : ''}
       <div class="news-meta">
         <span class="news-tag ${esc(n.category)}">${esc(n.category)}</span>
         <span>${esc(date)}</span>
       </div>
-    </div>`;
-  }).join('');
-  grid.innerHTML = counter + cards;
+    </div>`);
+
+    // Inject ad slot every 5 articles
+    if ((i + 1) % 5 === 0) {
+      cards.push(`<div class="ad-slot ad-slot-news"><span>Ad space · available</span></div>`);
+    }
+  });
+  grid.innerHTML = counter + cards.join('');
 }
 
 // ── Data loaders ──
@@ -354,6 +374,8 @@ async function loadCalendar() {
     allEvents = data.events || [];
     renderStats();
     renderCalendar();
+    lastLoadedAt = Date.now();
+    updateLastUpdated();
   } catch (err) {
     $('tbody').innerHTML = `<tr><td colspan="4" class="empty">Failed: ${esc(err.message)}</td></tr>`;
   }
@@ -381,10 +403,20 @@ document.querySelectorAll('[data-day]').forEach(btn => {
     document.querySelectorAll('[data-day]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     dayFilter = btn.dataset.day;
+    watchlistOnly = false;
+    $('watchlistBtn').classList.remove('active');
     autoScrollDone = false;
     renderCalendar();
     renderStats();
   });
+});
+
+$('watchlistBtn')?.addEventListener('click', () => {
+  watchlistOnly = !watchlistOnly;
+  $('watchlistBtn').classList.toggle('active', watchlistOnly);
+  autoScrollDone = false;
+  renderCalendar();
+  renderStats();
 });
 
 document.querySelectorAll('[data-cur]').forEach(btn => {
@@ -413,18 +445,138 @@ $('newsSearch').addEventListener('input', e => {
   renderNews();
 });
 
-// ── Save currency filter to profile ──
+// ── Save currency filter ──
 let saveFilterTimeout = null;
 function saveCurrencyFilterToProfile() {
   if (!Auth.isLoggedIn) return;
   if (saveFilterTimeout) clearTimeout(saveFilterTimeout);
   saveFilterTimeout = setTimeout(async () => {
-    try {
-      await Auth.updateProfile({ currency_filter: currencyFilter });
-    } catch (e) {
-      console.warn('Could not save currency filter:', e.message);
-    }
+    try { await Auth.updateProfile({ currency_filter: currencyFilter }); }
+    catch (e) { console.warn('filter save failed:', e.message); }
   }, 800);
+}
+
+// ── Watchlist toggle ──
+async function toggleWatchlist(ev) {
+  if (!Auth.isLoggedIn) {
+    alert('Log in to use watchlist');
+    return;
+  }
+  const key = eventKey(ev);
+  const idx = watchlist.indexOf(key);
+  if (idx >= 0) watchlist.splice(idx, 1);
+  else watchlist.push(key);
+
+  try {
+    await Auth.updateProfile({ watchlist });
+    const p = Auth.profile || {};
+    p.watchlist = watchlist;
+    Auth.saveProfile(p);
+  } catch (e) {
+    console.warn('watchlist save failed:', e.message);
+  }
+
+  renderCalendar();
+}
+
+// ── Event modal ──
+function openEventModal(ev) {
+  const modal = $('eventModal');
+  const content = $('eventModalContent');
+  const ik = impactKey(ev.impact);
+  const bm = (ev.beatMiss || '').toLowerCase();
+  const key = eventKey(ev);
+  const starred = watchlist.includes(key);
+  const curFlag = flag(ev.currency);
+
+  let actualCls = '';
+  if (bm === 'beat') actualCls = 'beat';
+  else if (bm === 'miss') actualCls = 'miss';
+
+  const localTime = ev.timestamp ? formatTimeInMode(ev.timestamp) : (ev.time || '—');
+  const countdown = ev.timestamp ? formatCountdown(ev.timestamp) : '';
+
+  content.innerHTML = `
+    <div class="detail-header">
+      <span class="flag">${curFlag}</span>
+      <span class="cur">${esc(ev.currency || '')}</span>
+      <span class="detail-badge ${ik}">${ik}</span>
+    </div>
+    <div class="detail-title">${esc(ev.event || '')}</div>
+    <div class="detail-time">${esc(ev.date || '')} · ${esc(localTime)}${countdown ? ` · ${esc(countdown)}` : ''}</div>
+
+    <div class="detail-values">
+      <div class="detail-value">
+        <div class="lbl">Actual</div>
+        <div class="val ${actualCls}">${esc(ev.actual || '—')}</div>
+      </div>
+      <div class="detail-value">
+        <div class="lbl">Forecast</div>
+        <div class="val forecast">${esc(ev.forecast || '—')}</div>
+      </div>
+      <div class="detail-value">
+        <div class="lbl">Previous</div>
+        <div class="val previous">${esc(ev.previous || '—')}</div>
+      </div>
+    </div>
+
+    <div class="detail-actions">
+      <button class="detail-btn" id="modalStar">${starred ? '⭐ Starred' : '☆ Add to watchlist'}</button>
+      <button class="detail-btn primary" id="modalShare">📤 Share</button>
+    </div>
+  `;
+
+  modal.classList.add('open');
+
+  $('modalStar').addEventListener('click', async () => {
+    await toggleWatchlist(ev);
+    const stillStarred = watchlist.includes(key);
+    $('modalStar').textContent = stillStarred ? '⭐ Starred' : '☆ Add to watchlist';
+  });
+
+  $('modalShare').addEventListener('click', () => shareEvent(ev));
+}
+
+function closeEventModal() {
+  $('eventModal').classList.remove('open');
+}
+
+$('eventModalClose').addEventListener('click', closeEventModal);
+$('eventModal').addEventListener('click', (e) => {
+  if (e.target.id === 'eventModal') closeEventModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeEventModal();
+});
+
+// ── Share ──
+async function shareEvent(ev) {
+  const flagEmoji = flag(ev.currency);
+  const time = ev.timestamp ? formatTimeInMode(ev.timestamp) : (ev.time || '');
+  const parts = [
+    `${flagEmoji} ${ev.currency} — ${ev.event}`,
+    `${ev.date || ''} ${time}`.trim(),
+  ];
+  if (ev.actual) parts.push(`Actual: ${ev.actual}${ev.beatMiss ? ` (${ev.beatMiss})` : ''}`);
+  if (ev.forecast) parts.push(`Forecast: ${ev.forecast}`);
+  if (ev.previous) parts.push(`Previous: ${ev.previous}`);
+  parts.push('via Will\'s AI');
+
+  const text = parts.join('\n');
+  const url = 'https://wills-ai-9mt4.onrender.com';
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: `${ev.currency} ${ev.event}`, text, url });
+    } catch {}
+  } else {
+    try {
+      await navigator.clipboard.writeText(text + '\n' + url);
+      alert('Copied to clipboard!');
+    } catch {
+      prompt('Copy this:', text + '\n' + url);
+    }
+  }
 }
 
 // ── Timezone toggle ──
@@ -511,21 +663,19 @@ $('formLogin').addEventListener('submit', async e => {
   }
 });
 
-// ── Apply saved preferences from profile ──
 function applyProfilePreferences() {
   const p = Auth.profile;
   if (!p) return;
-
-  // Currency filter
   const saved = p.currency_filter || 'all';
   if (saved !== currencyFilter) {
     currencyFilter = saved;
     document.querySelectorAll('[data-cur]').forEach(b => {
       b.classList.toggle('active', b.dataset.cur === saved);
     });
-    renderCalendar();
-    renderStats();
   }
+  watchlist = Array.isArray(p.watchlist) ? p.watchlist : [];
+  renderCalendar();
+  renderStats();
 }
 
 function renderAuthArea() {
@@ -560,8 +710,8 @@ function renderAuthArea() {
   $('menuLogout').addEventListener('click', () => {
     Auth.logout();
     renderAuthArea();
-    // Reset filter to default on logout
     currencyFilter = 'all';
+    watchlist = [];
     document.querySelectorAll('[data-cur]').forEach(b => {
       b.classList.toggle('active', b.dataset.cur === 'all');
     });
@@ -570,7 +720,7 @@ function renderAuthArea() {
   });
 }
 
-// ── Preferences ──
+// ── Preferences panel ──
 function openPrefs() {
   if (!Auth.isLoggedIn) return;
   prefPanel.classList.add('open');
@@ -613,9 +763,6 @@ async function renderPrefs() {
       <a href="${TELEGRAM_BOT_URL}" target="_blank" rel="noopener" class="pref-telegram-btn">
         ${hasTelegram ? '✅ Connected · Open bot' : '📱 Open @Wills_AI_Alert_bot'}
       </a>
-      <p style="font-size:11px;color:var(--text-dim);margin-top:6px;">
-        ${hasTelegram ? 'You are receiving Telegram alerts.' : 'Send /start to the bot for instant alerts.'}
-      </p>
     </div>
     <div class="pref-section">
       <div class="pref-toggle">
@@ -659,25 +806,21 @@ async function renderPrefs() {
     emailOn = !emailOn;
     $('prefEmailToggle').classList.toggle('on', emailOn);
   });
-
   document.querySelectorAll('#prefCurrencies .chip').forEach(c => c.addEventListener('click', () => c.classList.toggle('active')));
   document.querySelectorAll('#prefCategories .chip').forEach(c => c.addEventListener('click', () => c.classList.toggle('active')));
 
   $('prefSave').addEventListener('click', async () => {
     const btn = $('prefSave');
     btn.disabled = true; btn.textContent = 'Saving…';
-
     const newEmail = $('prefEmail').value.trim();
     const chosenCurrencies = [...document.querySelectorAll('#prefCurrencies .chip.active')].map(c => c.dataset.val);
     const chosenCategories = [...document.querySelectorAll('#prefCategories .chip.active')].map(c => c.dataset.val);
-
     if (newEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
       $('prefSaved').textContent = '❌ Invalid email';
       $('prefSaved').style.color = '#ff6b6b';
       btn.disabled = false; btn.textContent = 'Save preferences';
       return;
     }
-
     try {
       const updated = await Auth.updateProfile({
         email: newEmail || null,
@@ -710,8 +853,6 @@ async function renderPrefs() {
   await refreshAll();
   setInterval(refreshAll, 60000);
   setInterval(() => Auth.ensureFresh(), 60000);
-  // Update countdowns every 30 seconds
-  countdownInterval = setInterval(() => {
-    if (dayFilter !== 'all') renderCalendar();
-  }, 30000);
+  setInterval(() => { if (dayFilter !== 'all') renderCalendar(); }, 30000);
+  setInterval(updateLastUpdated, 30000);
 })();
