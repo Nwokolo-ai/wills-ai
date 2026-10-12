@@ -153,6 +153,84 @@ app.post('/api/telegram/webhook', async (req, res) => {
   } catch (err) { console.error('[webhook]', err.message); }
   res.sendStatus(200);
 });
+// ── Push subscription endpoint ──
+app.post('/api/push/subscribe', async (req, res) => {
+  try {
+    const { subscription, userId } = req.body || {};
+    if (!subscription?.endpoint || !subscription?.keys) {
+      return res.status(400).json({ error: 'Invalid subscription' });
+    }
+
+    const row = {
+      endpoint: subscription.endpoint,
+      p256dh: subscription.keys.p256dh,
+      auth: subscription.keys.auth,
+      user_id: userId || null,
+    };
+
+    const { error } = await db.admin
+      .from('push_subscriptions')
+      .upsert(row, { onConflict: 'endpoint' });
+
+    if (error) throw error;
+    console.log('[push] subscribed:', subscription.endpoint.slice(0, 40) + '...');
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[push] subscribe error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Send push to all subscribers (internal use / testing) ──
+async function sendPushToAll(payload) {
+  if (!webpush) return { sent: 0, failed: 0 };
+
+  const { data: subs } = await db.admin
+    .from('push_subscriptions')
+    .select('*');
+
+  if (!subs?.length) return { sent: 0, failed: 0 };
+
+  let sent = 0, failed = 0;
+  const toDelete = [];
+
+  for (const sub of subs) {
+    try {
+      await webpush.sendNotification(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        JSON.stringify(payload)
+      );
+      sent++;
+    } catch (err) {
+      failed++;
+      // 410 Gone = subscription is dead, remove it
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        toDelete.push(sub.endpoint);
+      }
+    }
+  }
+
+  if (toDelete.length) {
+    await db.admin.from('push_subscriptions').delete().in('endpoint', toDelete);
+    console.log('[push] removed', toDelete.length, 'dead subscriptions');
+  }
+
+  console.log(`[push] sent=${sent} failed=${failed}`);
+  return { sent, failed };
+}
+
+// Expose globally so alerts.js can use it
+global.sendPushToAll = sendPushToAll;
+
+// ── Test endpoint ──
+app.get('/api/push/test', async (req, res) => {
+  const result = await sendPushToAll({
+    title: "Will's AI — Test",
+    body: 'Push notifications are working!',
+    url: '/',
+  });
+  res.json(result);
+});
 
 // Daily safety-net full refresh at 4 AM (in case per-event timer missed anything)
 cron.schedule('0 4 * * *', async () => {
