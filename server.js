@@ -11,6 +11,26 @@ const db = require('./db');
 const alerts = require('./alerts');
 const tg = require('./telegram');
 
+// Push notifications setup
+let webpush = null;
+try {
+  webpush = require('web-push');
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(
+      process.env.VAPID_SUBJECT || 'mailto:admin@wills-ai.local',
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+    console.log('[push] web-push configured');
+  } else {
+    console.warn('[push] VAPID keys missing — push disabled');
+    webpush = null;
+  }
+} catch (e) {
+  console.warn('[push] web-push not installed:', e.message);
+  webpush = null;
+}
+
 const app = express();
 const PORT = process.env.PORT || 3500;
 const PUBLIC_DIR = path.join(__dirname, 'public');
