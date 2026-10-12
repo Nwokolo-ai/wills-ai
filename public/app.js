@@ -856,3 +856,183 @@ async function renderPrefs() {
   setInterval(() => { if (dayFilter !== 'all') renderCalendar(); }, 30000);
   setInterval(updateLastUpdated, 30000);
 })();
+// ═══════════════════════════════════════════════════════════
+//  SERVICE WORKER + PWA + PUSH NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════
+
+let deferredPrompt = null;
+let swRegistration = null;
+
+// ── Register service worker ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      swRegistration = await navigator.serviceWorker.register('/sw.js');
+      console.log('[sw] registered');
+    } catch (e) {
+      console.warn('[sw] failed:', e.message);
+    }
+  });
+}
+
+// ── Capture install prompt ──
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Check if dismissed recently
+  const dismissed = localStorage.getItem('pwa_dismissed_at');
+  if (dismissed) {
+    const since = Date.now() - parseInt(dismissed);
+    if (since < 7 * 24 * 3600 * 1000) return; // 7 days
+  }
+  // Show after 15 seconds
+  setTimeout(() => {
+    if (deferredPrompt) $('pwaBanner')?.classList.add('show');
+  }, 15000);
+});
+
+// ── Install button ──
+$('pwaInstall')?.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  console.log('[pwa] user choice:', outcome);
+  deferredPrompt = null;
+  $('pwaBanner')?.classList.remove('show');
+});
+
+// ── Dismiss button ──
+$('pwaDismiss')?.addEventListener('click', () => {
+  localStorage.setItem('pwa_dismissed_at', String(Date.now()));
+  $('pwaBanner')?.classList.remove('show');
+});
+
+// ── Already installed? Hide ──
+if (window.matchMedia('(display-mode: standalone)').matches) {
+  $('pwaBanner')?.remove();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PUSH NOTIFICATION PERMISSION + SUBSCRIBE
+// ═══════════════════════════════════════════════════════════
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return false;
+  if (!swRegistration) return false;
+
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return false;
+
+  try {
+    // Fetch VAPID public key from server config
+    const cfg = await fetch('/api/config').then(r => r.json());
+    const vapidKey = cfg.vapidPublicKey;
+
+    if (!vapidKey) {
+      console.warn('[push] no VAPID public key on server');
+      return false;
+    }
+
+    const subscription = await swRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey),
+    });
+
+    // Save to Supabase
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subscription: subscription.toJSON(),
+        userId: Auth.isLoggedIn ? Auth.profile?.id : null,
+      }),
+    });
+
+    console.log('[push] subscribed');
+    return true;
+  } catch (e) {
+    console.error('[push] subscribe failed:', e.message);
+    return false;
+  }
+}
+
+// Base64 URL → Uint8Array
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+// ── Auto-ask for notification permission after 30s ──
+setTimeout(() => {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') return;
+  if (Notification.permission === 'denied') return;
+  if (localStorage.getItem('notif_dismissed')) return;
+
+  // Show a soft prompt via browser's own dialog
+  requestNotificationPermission();
+}, 30000);
+
+// ═══════════════════════════════════════════════════════════
+//  IN-APP ALERT POLLING (shows banner when event just fired)
+// ═══════════════════════════════════════════════════════════
+let knownEventKeys = new Set();
+
+async function pollForNewActuals() {
+  try {
+    const res = await fetch('/api/calendar');
+    if (!res.ok) return;
+    const data = await res.json();
+    const events = data.events || [];
+
+    for (const e of events) {
+      const key = eventKey(e);
+      // Only care about events that have an actual and we haven't seen
+      if (e.actual && !knownEventKeys.has(key)) {
+        knownEventKeys.add(key);
+        // Show in-app banner if the event was in the past 15 minutes
+        if (e.timestamp) {
+          const diff = Date.now() - new Date(e.timestamp).getTime();
+          if (diff >= 0 && diff < 15 * 60 * 1000) {
+            showInAppAlert(e);
+          }
+        }
+      } else if (!e.actual) {
+        // Track un-actualized events too so we don't spam later
+      }
+    }
+  } catch (err) {
+    console.warn('[poll] failed:', err.message);
+  }
+}
+
+function showInAppAlert(ev) {
+  const existing = $('inAppAlert');
+  if (existing) existing.remove();
+
+  const el = document.createElement('div');
+  el.id = 'inAppAlert';
+  el.className = 'in-app-alert';
+  el.innerHTML = `
+    <span class="alert-flag">${flag(ev.currency)}</span>
+    <div class="alert-body">
+      <strong>${esc(ev.currency)} ${esc(ev.event)}</strong>
+      <span>Actual: <b>${esc(ev.actual)}</b> · Forecast: ${esc(ev.forecast || '—')}${ev.beatMiss ? ` · ${esc(ev.beatMiss)}` : ''}</span>
+    </div>
+    <button class="alert-close">✕</button>
+  `;
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add('show'), 50);
+  el.querySelector('.alert-close').addEventListener('click', () => el.remove());
+  setTimeout(() => el.remove(), 5 * 60 * 1000);
+}
+
+// Poll every 60s
+setInterval(pollForNewActuals, 60000);
+pollForNewActuals();
