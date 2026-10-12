@@ -133,5 +133,51 @@ async function runAll() {
   try { await checkEventAlerts(); } catch (e) { console.error('[alerts:event]', e.message); }
   try { await checkNewsAlerts(); } catch (e) { console.error('[alerts:news]', e.message); }
 }
+// ═══════════════════════════════════════════════════════════
+//  Post-event notification (called by ffScraper when actual lands)
+// ═══════════════════════════════════════════════════════════
+async function notifyNewActuals(events) {
+  if (!events?.length) return;
 
+  for (const ev of events) {
+    if (!ev.actual) continue;
+
+    const impact = (ev.impact || '').toLowerCase();
+    // Only notify for high/medium
+    if (impact !== 'high' && impact !== 'medium') continue;
+
+    const emoji = impact === 'high' ? '⚠️' : '🔔';
+    const label = impact === 'high' ? 'HIGH' : 'MED';
+    const beat = ev.beat_miss ? ` · ${ev.beat_miss}` : '';
+
+    const title = `${emoji} ${ev.currency} ${ev.title}`;
+    const body = `Actual: ${ev.actual} · Forecast: ${ev.forecast || '—'}${beat}`;
+
+    // ── Telegram broadcast ──
+    try {
+      const text = `${emoji} <b>${label} IMPACT — RELEASED</b>\n<b>${ev.currency} ${ev.title}</b>\n\nActual: <b>${ev.actual}</b>\nForecast: ${ev.forecast || '—'}\nPrevious: ${ev.previous || '—'}${beat ? `\n\n${beat}` : ''}`;
+      await tg.broadcast(text);
+    } catch (e) {
+      console.error('[notify] telegram failed:', e.message);
+    }
+
+    // ── Browser push ──
+    try {
+      if (global.sendPushToAll) {
+        await global.sendPushToAll({
+          title,
+          body,
+          url: '/',
+          tag: `event-${ev.event_key}`,
+        });
+      }
+    } catch (e) {
+      console.error('[notify] push failed:', e.message);
+    }
+
+    console.log(`[notify] sent for ${ev.currency} ${ev.title}`);
+  }
+}
+
+module.exports = { runAll, cleanupOldLogs, notifyNewActuals };
 module.exports = { runAll, cleanupOldLogs };
