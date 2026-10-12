@@ -53,7 +53,11 @@ function formatDateLabel(iso) {
 }
 
 app.get('/api/config', (req, res) => {
-  res.json({ supabaseUrl: db.SUPABASE_URL, supabasePublishableKey: db.PUBLISHABLE });
+  res.json({
+    supabaseUrl: db.SUPABASE_URL,
+    supabasePublishableKey: db.PUBLISHABLE,
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || null,
+  });
 });
 
 app.get('/api/health', (req, res) => {
