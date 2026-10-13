@@ -96,6 +96,21 @@ function getShortTimezoneLabel() {
   } catch { return 'Local'; }
 }
 
+// Get the numeric offset like "+1" or "-5"
+function getTimezoneOffsetString() {
+  if (timezoneMode === 'utc') return '+0';
+  const offsetMin = -new Date().getTimezoneOffset();
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const abs = Math.abs(offsetMin);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return m === 0 ? `${sign}${h}` : `${sign}${h}:${String(m).padStart(2,'0')}`;
+}
+
+// Full label like "WAT +1" or "UTC +0"
+function getTimezoneFullLabel() {
+  return `${getShortTimezoneLabel()} ${getTimezoneOffsetString()}`;
+}
 function formatTimeInMode(isoTimestamp, fallback = '—') {
   if (!isoTimestamp) return fallback;
   const d = new Date(isoTimestamp);
@@ -108,6 +123,11 @@ function formatTimeInMode(isoTimestamp, fallback = '—') {
   return d.toLocaleTimeString(undefined, {
     hour: 'numeric', minute: '2-digit', hour12: true,
   }).replace(/\s+/g, '').toLowerCase();
+}
+// Get the offset badge to show next to the time
+function formatTimeOffsetBadge() {
+  if (timezoneMode === 'utc') return 'UTC';
+  return getTimezoneOffsetString();
 }
 
 function formatDateInMode(isoTimestamp, fallback = '') {
@@ -233,8 +253,11 @@ function renderCalendar() {
     if (watchlistOnly) label = 'in your watchlist';
     else if (dayFilter === 'today') label = 'today';
     else if (dayFilter === 'tomorrow') label = 'tomorrow';
-    else if (dayFilter === 'week') label = 'this week';
-    tbody.innerHTML = `<tr><td colspan="4" class="empty">No events ${label}</td></tr>`;
+    else if (dayFilter === s) label = 'this week';
+    tbody.innerHTML = `<td class="col-time">
+  <div>${esc(displayTime)}</div>
+  <div class="tz-badge">${esc(formatTimeOffsetBadge())}</div>
+</td>`;
     return;
   }
 
