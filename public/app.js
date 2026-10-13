@@ -606,7 +606,7 @@ async function shareEvent(ev) {
 function updateTzButton() {
   const btn = $('tzToggle');
   if (!btn) return;
-  btn.textContent = `🌍 ${getShortTimezoneLabel()}`;
+  btn.textContent = `🌍 ${getTimezoneFullLabel()}`;
 }
 
 $('tzToggle')?.addEventListener('click', () => {
