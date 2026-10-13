@@ -9,7 +9,8 @@ let currencyFilter = 'all';
 let watchlistOnly = false;
 let newsCat = 'all';
 let newsSearch = '';
-let timezoneMode = localStorage.getItem('wills_timezone_mode') || 'utc';
+// DEFAULT IS LOCAL — user sees their own timezone first
+let timezoneMode = localStorage.getItem('wills_timezone_mode') || 'local';
 let watchlist = [];
 let autoScrollDone = false;
 let lastLoadedAt = null;
@@ -87,6 +88,7 @@ function formatCountdown(isoTimestamp) {
   return past ? `${text} ago` : `in ${text}`;
 }
 
+// ── Timezone helpers ──
 function getShortTimezoneLabel() {
   if (timezoneMode === 'utc') return 'UTC';
   try {
@@ -96,7 +98,6 @@ function getShortTimezoneLabel() {
   } catch { return 'Local'; }
 }
 
-// Get the numeric offset like "+1" or "-5"
 function getTimezoneOffsetString() {
   if (timezoneMode === 'utc') return '+0';
   const offsetMin = -new Date().getTimezoneOffset();
@@ -107,10 +108,16 @@ function getTimezoneOffsetString() {
   return m === 0 ? `${sign}${h}` : `${sign}${h}:${String(m).padStart(2,'0')}`;
 }
 
-// Full label like "WAT +1" or "UTC +0"
 function getTimezoneFullLabel() {
   return `${getShortTimezoneLabel()} ${getTimezoneOffsetString()}`;
 }
+
+function formatTimeOffsetBadge() {
+  if (timezoneMode === 'utc') return 'UTC';
+  return getTimezoneOffsetString();
+}
+
+// ── KEY FUNCTION: This does the actual UTC → local conversion ──
 function formatTimeInMode(isoTimestamp, fallback = '—') {
   if (!isoTimestamp) return fallback;
   const d = new Date(isoTimestamp);
@@ -120,14 +127,10 @@ function formatTimeInMode(isoTimestamp, fallback = '—') {
       hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC',
     }).replace(/\s+/g, '').toLowerCase();
   }
+  // LOCAL mode: convert to user's browser timezone
   return d.toLocaleTimeString(undefined, {
     hour: 'numeric', minute: '2-digit', hour12: true,
   }).replace(/\s+/g, '').toLowerCase();
-}
-// Get the offset badge to show next to the time
-function formatTimeOffsetBadge() {
-  if (timezoneMode === 'utc') return 'UTC';
-  return getTimezoneOffsetString();
 }
 
 function formatDateInMode(isoTimestamp, fallback = '') {
@@ -172,12 +175,12 @@ document.querySelectorAll('.theme-btn').forEach(btn => {
 });
 applyTheme(localStorage.getItem('wills_theme') || 'dark');
 
-// ── Event key for watchlist ──
+// ── Event key ──
 function eventKey(e) {
   return `${e.date}|${e.time}|${e.currency}|${e.event}`;
 }
 
-// ── Filter ──
+// ── Filters ──
 function filterEvents(events) {
   let filtered = events;
   if (dayFilter === 'today') filtered = filtered.filter(e => isToday(e.date));
@@ -192,7 +195,6 @@ function filterEvents(events) {
   return filtered;
 }
 
-// ── Auto-scroll to last past event ──
 function autoScrollToLastPast() {
   if (autoScrollDone) return;
   const tbody = $('tbody');
@@ -205,7 +207,7 @@ function autoScrollToLastPast() {
     if (row.classList.contains('day')) continue;
     const timeCell = row.querySelector('.col-time');
     if (!timeCell) continue;
-    const timeText = timeCell.textContent.trim();
+    const timeText = timeCell.querySelector('div')?.textContent.trim() || timeCell.textContent.trim();
     if (!/\d/.test(timeText)) continue;
     let dayLabel = '';
     let prev = row.previousElementSibling;
@@ -243,7 +245,6 @@ function autoScrollToLastPast() {
   }
 }
 
-// ── Calendar render ──
 function renderCalendar() {
   const tbody = $('tbody');
   const events = filterEvents(allEvents);
@@ -253,11 +254,8 @@ function renderCalendar() {
     if (watchlistOnly) label = 'in your watchlist';
     else if (dayFilter === 'today') label = 'today';
     else if (dayFilter === 'tomorrow') label = 'tomorrow';
-    else if (dayFilter === s) label = 'this week';
-    tbody.innerHTML = `<td class="col-time">
-  <div>${esc(displayTime)}</div>
-  <div class="tz-badge">${esc(formatTimeOffsetBadge())}</div>
-</td>`;
+    else if (dayFilter === 'week') label = 'this week';
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">No events ${label}</td></tr>`;
     return;
   }
 
@@ -307,10 +305,14 @@ function renderCalendar() {
       if (countdown) vals.push(`<span class="countdown">${esc(countdown)}</span>`);
 
       const displayTime = e.timestamp ? formatTimeInMode(e.timestamp) : (e.time || '—');
+      const tzBadge = formatTimeOffsetBadge();
       const starHTML = starred ? '<span class="star-icon">⭐</span>' : '';
 
       html += `<tr class="event-row impact-${ik}${starred ? ' starred' : ''}" data-key="${esc(key)}">
-        <td class="col-time">${esc(displayTime)}</td>
+        <td class="col-time">
+          <div>${esc(displayTime)}</div>
+          <div class="tz-badge">${esc(tzBadge)}</div>
+        </td>
         <td class="col-ccy"><span class="flag">${curFlag}</span>${esc(e.currency || '—')}</td>
         <td class="col-imp"><span class="impact-dot ${ik}"></span></td>
         <td class="col-event">
@@ -322,7 +324,6 @@ function renderCalendar() {
   }
   tbody.innerHTML = html;
 
-  // Attach click handlers
   tbody.querySelectorAll('tr.event-row').forEach(row => {
     row.addEventListener('click', () => {
       const key = row.dataset.key;
@@ -341,7 +342,6 @@ function renderStats() {
   $('statMedium').textContent = filtered.filter(e => impactKey(e.impact) === 'medium').length;
 }
 
-// ── Last updated ──
 function updateLastUpdated() {
   const el = $('lastUpdated');
   if (!el || !lastLoadedAt) return;
@@ -351,7 +351,6 @@ function updateLastUpdated() {
   else el.textContent = `${Math.floor(seconds/3600)}h ago`;
 }
 
-// ── News render (with ad injection) ──
 function renderNews() {
   const grid = $('newsGrid');
   let items = allNews.slice();
@@ -380,7 +379,6 @@ function renderNews() {
       </div>
     </div>`);
 
-    // Inject ad slot every 5 articles
     if ((i + 1) % 5 === 0) {
       cards.push(`<div class="ad-slot ad-slot-news"><span>Ad space · available</span></div>`);
     }
@@ -388,7 +386,6 @@ function renderNews() {
   grid.innerHTML = counter + cards.join('');
 }
 
-// ── Data loaders ──
 async function loadCalendar() {
   try {
     const res = await fetch('/api/calendar');
@@ -420,14 +417,13 @@ async function refreshAll() {
   await Promise.all([loadCalendar(), loadNews()]);
 }
 
-// ── Filter handlers ──
 document.querySelectorAll('[data-day]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('[data-day]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     dayFilter = btn.dataset.day;
     watchlistOnly = false;
-    $('watchlistBtn').classList.remove('active');
+    $('watchlistBtn')?.classList.remove('active');
     autoScrollDone = false;
     renderCalendar();
     renderStats();
@@ -468,7 +464,6 @@ $('newsSearch').addEventListener('input', e => {
   renderNews();
 });
 
-// ── Save currency filter ──
 let saveFilterTimeout = null;
 function saveCurrencyFilterToProfile() {
   if (!Auth.isLoggedIn) return;
@@ -479,7 +474,6 @@ function saveCurrencyFilterToProfile() {
   }, 800);
 }
 
-// ── Watchlist toggle ──
 async function toggleWatchlist(ev) {
   if (!Auth.isLoggedIn) {
     alert('Log in to use watchlist');
@@ -502,7 +496,6 @@ async function toggleWatchlist(ev) {
   renderCalendar();
 }
 
-// ── Event modal ──
 function openEventModal(ev) {
   const modal = $('eventModal');
   const content = $('eventModalContent');
@@ -518,6 +511,7 @@ function openEventModal(ev) {
 
   const localTime = ev.timestamp ? formatTimeInMode(ev.timestamp) : (ev.time || '—');
   const countdown = ev.timestamp ? formatCountdown(ev.timestamp) : '';
+  const tzBadge = formatTimeOffsetBadge();
 
   content.innerHTML = `
     <div class="detail-header">
@@ -526,7 +520,7 @@ function openEventModal(ev) {
       <span class="detail-badge ${ik}">${ik}</span>
     </div>
     <div class="detail-title">${esc(ev.event || '')}</div>
-    <div class="detail-time">${esc(ev.date || '')} · ${esc(localTime)}${countdown ? ` · ${esc(countdown)}` : ''}</div>
+    <div class="detail-time">${esc(ev.date || '')} · ${esc(localTime)} (${esc(tzBadge)})${countdown ? ` · ${esc(countdown)}` : ''}</div>
 
     <div class="detail-values">
       <div class="detail-value">
@@ -572,13 +566,13 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeEventModal();
 });
 
-// ── Share ──
 async function shareEvent(ev) {
   const flagEmoji = flag(ev.currency);
   const time = ev.timestamp ? formatTimeInMode(ev.timestamp) : (ev.time || '');
+  const tzBadge = formatTimeOffsetBadge();
   const parts = [
     `${flagEmoji} ${ev.currency} — ${ev.event}`,
-    `${ev.date || ''} ${time}`.trim(),
+    `${ev.date || ''} ${time} (${tzBadge})`.trim(),
   ];
   if (ev.actual) parts.push(`Actual: ${ev.actual}${ev.beatMiss ? ` (${ev.beatMiss})` : ''}`);
   if (ev.forecast) parts.push(`Forecast: ${ev.forecast}`);
@@ -589,9 +583,7 @@ async function shareEvent(ev) {
   const url = 'https://wills-ai-9mt4.onrender.com';
 
   if (navigator.share) {
-    try {
-      await navigator.share({ title: `${ev.currency} ${ev.event}`, text, url });
-    } catch {}
+    try { await navigator.share({ title: `${ev.currency} ${ev.event}`, text, url }); } catch {}
   } else {
     try {
       await navigator.clipboard.writeText(text + '\n' + url);
@@ -602,7 +594,6 @@ async function shareEvent(ev) {
   }
 }
 
-// ── Timezone toggle ──
 function updateTzButton() {
   const btn = $('tzToggle');
   if (!btn) return;
@@ -617,7 +608,6 @@ $('tzToggle')?.addEventListener('click', () => {
   renderCalendar();
 });
 
-// ── Auth ──
 const authPanel = $('authPanel');
 const authOverlay = $('authOverlay');
 const authArea = $('authArea');
@@ -743,7 +733,6 @@ function renderAuthArea() {
   });
 }
 
-// ── Preferences panel ──
 function openPrefs() {
   if (!Auth.isLoggedIn) return;
   prefPanel.classList.add('open');
@@ -867,54 +856,32 @@ async function renderPrefs() {
   });
 }
 
-// ── Init ──
-(async function init() {
-  if (Auth.isLoggedIn) await Auth.ensureFresh();
-  updateTzButton();
-  renderAuthArea();
-  applyProfilePreferences();
-  await refreshAll();
-  setInterval(refreshAll, 60000);
-  setInterval(() => Auth.ensureFresh(), 60000);
-  setInterval(() => { if (dayFilter !== 'all') renderCalendar(); }, 30000);
-  setInterval(updateLastUpdated, 30000);
-})();
-// ═══════════════════════════════════════════════════════════
-//  SERVICE WORKER + PWA + PUSH NOTIFICATIONS
-// ═══════════════════════════════════════════════════════════
-
+// ── Service worker + PWA + Push ──
 let deferredPrompt = null;
 let swRegistration = null;
 
-// ── Register service worker ──
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
       swRegistration = await navigator.serviceWorker.register('/sw.js');
       console.log('[sw] registered');
-    } catch (e) {
-      console.warn('[sw] failed:', e.message);
-    }
+    } catch (e) { console.warn('[sw] failed:', e.message); }
   });
 }
 
-// ── Capture install prompt ──
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
-  // Check if dismissed recently
   const dismissed = localStorage.getItem('pwa_dismissed_at');
   if (dismissed) {
     const since = Date.now() - parseInt(dismissed);
-    if (since < 7 * 24 * 3600 * 1000) return; // 7 days
+    if (since < 7 * 24 * 3600 * 1000) return;
   }
-  // Show after 15 seconds
   setTimeout(() => {
     if (deferredPrompt) $('pwaBanner')?.classList.add('show');
   }, 15000);
 });
 
-// ── Install button ──
 $('pwaInstall')?.addEventListener('click', async () => {
   if (!deferredPrompt) return;
   deferredPrompt.prompt();
@@ -924,44 +891,28 @@ $('pwaInstall')?.addEventListener('click', async () => {
   $('pwaBanner')?.classList.remove('show');
 });
 
-// ── Dismiss button ──
 $('pwaDismiss')?.addEventListener('click', () => {
   localStorage.setItem('pwa_dismissed_at', String(Date.now()));
   $('pwaBanner')?.classList.remove('show');
 });
 
-// ── Already installed? Hide ──
 if (window.matchMedia('(display-mode: standalone)').matches) {
   $('pwaBanner')?.remove();
 }
 
-// ═══════════════════════════════════════════════════════════
-//  PUSH NOTIFICATION PERMISSION + SUBSCRIBE
-// ═══════════════════════════════════════════════════════════
-
 async function requestNotificationPermission() {
   if (!('Notification' in window)) return false;
   if (!swRegistration) return false;
-
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') return false;
-
   try {
-    // Fetch VAPID public key from server config
     const cfg = await fetch('/api/config').then(r => r.json());
     const vapidKey = cfg.vapidPublicKey;
-
-    if (!vapidKey) {
-      console.warn('[push] no VAPID public key on server');
-      return false;
-    }
-
+    if (!vapidKey) { console.warn('[push] no VAPID key'); return false; }
     const subscription = await swRegistration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(vapidKey),
     });
-
-    // Save to Supabase
     await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -970,7 +921,6 @@ async function requestNotificationPermission() {
         userId: Auth.isLoggedIn ? Auth.profile?.id : null,
       }),
     });
-
     console.log('[push] subscribed');
     return true;
   } catch (e) {
@@ -979,32 +929,23 @@ async function requestNotificationPermission() {
   }
 }
 
-// Base64 URL → Uint8Array
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
   return outputArray;
 }
 
-// ── Auto-ask for notification permission after 30s ──
 setTimeout(() => {
   if (!('Notification' in window)) return;
   if (Notification.permission === 'granted') return;
   if (Notification.permission === 'denied') return;
   if (localStorage.getItem('notif_dismissed')) return;
-
-  // Show a soft prompt via browser's own dialog
   requestNotificationPermission();
 }, 30000);
 
-// ═══════════════════════════════════════════════════════════
-//  IN-APP ALERT POLLING (shows banner when event just fired)
-// ═══════════════════════════════════════════════════════════
 let knownEventKeys = new Set();
 
 async function pollForNewActuals() {
@@ -1013,32 +954,22 @@ async function pollForNewActuals() {
     if (!res.ok) return;
     const data = await res.json();
     const events = data.events || [];
-
     for (const e of events) {
       const key = eventKey(e);
-      // Only care about events that have an actual and we haven't seen
       if (e.actual && !knownEventKeys.has(key)) {
         knownEventKeys.add(key);
-        // Show in-app banner if the event was in the past 15 minutes
         if (e.timestamp) {
           const diff = Date.now() - new Date(e.timestamp).getTime();
-          if (diff >= 0 && diff < 15 * 60 * 1000) {
-            showInAppAlert(e);
-          }
+          if (diff >= 0 && diff < 15 * 60 * 1000) showInAppAlert(e);
         }
-      } else if (!e.actual) {
-        // Track un-actualized events too so we don't spam later
       }
     }
-  } catch (err) {
-    console.warn('[poll] failed:', err.message);
-  }
+  } catch (err) { console.warn('[poll] failed:', err.message); }
 }
 
 function showInAppAlert(ev) {
   const existing = $('inAppAlert');
   if (existing) existing.remove();
-
   const el = document.createElement('div');
   el.id = 'inAppAlert';
   el.className = 'in-app-alert';
@@ -1056,6 +987,17 @@ function showInAppAlert(ev) {
   setTimeout(() => el.remove(), 5 * 60 * 1000);
 }
 
-// Poll every 60s
 setInterval(pollForNewActuals, 60000);
 pollForNewActuals();
+
+(async function init() {
+  if (Auth.isLoggedIn) await Auth.ensureFresh();
+  updateTzButton();
+  renderAuthArea();
+  applyProfilePreferences();
+  await refreshAll();
+  setInterval(refreshAll, 60000);
+  setInterval(() => Auth.ensureFresh(), 60000);
+  setInterval(() => { if (dayFilter !== 'all') renderCalendar(); }, 30000);
+  setInterval(updateLastUpdated, 30000);
+})();
