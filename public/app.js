@@ -10,7 +10,9 @@ let watchlistOnly = false;
 let newsCat = 'all';
 let newsSearch = '';
 // DEFAULT IS LOCAL — user sees their own timezone first
-let timezoneMode = localStorage.getItem('wills_timezone_mode') || 'local';
+// New key v2 — forces everyone to reset to 'local' default
+let timezoneMode = localStorage.getItem('wills_timezone_mode_v2') || 'local';
+localStorage.setItem('wills_timezone_mode_v2', timezoneMode);
 let watchlist = [];
 let autoScrollDone = false;
 let lastLoadedAt = null;
@@ -602,7 +604,7 @@ function updateTzButton() {
 
 $('tzToggle')?.addEventListener('click', () => {
   timezoneMode = timezoneMode === 'utc' ? 'local' : 'utc';
-  localStorage.setItem('wills_timezone_mode', timezoneMode);
+  localStorage.setItem('wills_timezone_mode_v2', timezoneMode);
   updateTzButton();
   autoScrollDone = false;
   renderCalendar();
