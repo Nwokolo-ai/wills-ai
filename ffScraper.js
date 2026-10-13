@@ -1,9 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  ffScraper.js — Biquote → Supabase
-//
-//  · Startup: fetch full 2-week range → Supabase
-//  · Timer: fires 1s after each event, does a FULL refresh
-//  · Detects new actuals and notifies via alerts.js
+//  ffScraper.js — Biquote → Supabase with retry-on-release
 // ═══════════════════════════════════════════════════════════
 
 const BiquoteModule = require('biquote');
@@ -12,13 +8,10 @@ const { admin } = require('./db');
 
 const MODE = process.env.MODE || 'scrape';
 let nextTimer = null;
+let retryTimers = [];
 
-// Track previous actuals to detect new arrivals
 let previousActuals = new Map();
 
-// ────────────────────────────────────────────────────────────
-//  Helpers
-// ────────────────────────────────────────────────────────────
 function parseNumber(v) {
   if (v == null || v === '') return null;
   const s = String(v).replace(/[^\d.\-]/g, '');
@@ -114,9 +107,6 @@ async function pushToSupabase(rows) {
   return total;
 }
 
-// ────────────────────────────────────────────────────────────
-//  Biquote fetch — 2 weeks ahead
-// ────────────────────────────────────────────────────────────
 async function fetchBiquote() {
   const bq = new Biquote();
   const now = new Date();
@@ -129,9 +119,6 @@ async function fetchBiquote() {
   return events.map(toDbRow);
 }
 
-// ────────────────────────────────────────────────────────────
-//  Detect newly-arrived actuals (for post-event notifications)
-// ────────────────────────────────────────────────────────────
 function detectNewActuals(rows) {
   const fresh = [];
   for (const row of rows) {
@@ -148,9 +135,20 @@ function detectNewActuals(rows) {
   return fresh;
 }
 
-// ────────────────────────────────────────────────────────────
-//  MAIN SCRAPE
-// ────────────────────────────────────────────────────────────
+async function notifyActuals(newActuals) {
+  if (!newActuals.length) return;
+  console.log(`[ff] ${newActuals.length} new actuals detected`);
+  try {
+    const { notifyNewActuals } = require('./alerts');
+    if (notifyNewActuals) await notifyNewActuals(newActuals);
+  } catch (e) {
+    console.error('[ff] notify failed:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  FULL SCRAPE
+// ═══════════════════════════════════════════════════════════
 async function scrape() {
   if (MODE === 'read') {
     console.log('[ff] MODE=read — skip');
@@ -161,7 +159,6 @@ async function scrape() {
   try {
     const allRows = await fetchBiquote();
     if (!allRows.length) {
-      console.warn('[ff] no events');
       scheduleNextEventRefresh();
       return;
     }
@@ -172,21 +169,12 @@ async function scrape() {
     console.log(`[ff] ${valid.length} valid rows`);
 
     const newActuals = detectNewActuals(valid);
-
     await pushToSupabase(valid);
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
     console.log(`[ff] pushed ${valid.length} events — ${elapsed}s`);
 
-    if (newActuals.length) {
-      console.log(`[ff] ${newActuals.length} new actuals detected`);
-      try {
-        const { notifyNewActuals } = require('./alerts');
-        if (notifyNewActuals) await notifyNewActuals(newActuals);
-      } catch (e) {
-        console.error('[ff] notify failed:', e.message);
-      }
-    }
+    await notifyActuals(newActuals);
 
     scheduleNextEventRefresh();
   } catch (err) {
@@ -196,9 +184,78 @@ async function scrape() {
   }
 }
 
-// ────────────────────────────────────────────────────────────
-//  Next event timer
-// ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  TARGETED REFRESH — happens right after an event releases
+//  Retries multiple times in case Biquote is late
+// ═══════════════════════════════════════════════════════════
+async function targetedRefresh(eventKey) {
+  if (MODE === 'read') return;
+  console.log(`[ff] targeted refresh for ${eventKey.slice(0, 50)}...`);
+
+  try {
+    const allRows = await fetchBiquote();
+    const deduped = [...new Map(allRows.map(r => [r.event_key, r])).values()];
+    const valid = validateRows(deduped);
+
+    const newActuals = detectNewActuals(valid);
+    await pushToSupabase(valid);
+
+    if (newActuals.length) {
+      await notifyActuals(newActuals);
+      return true; // actual found — stop retries
+    }
+    return false; // actual still missing — keep retrying
+  } catch (err) {
+    console.error('[ff] targeted refresh error:', err.message);
+    return false;
+  }
+}
+
+async function fireRetriesForNextEvent() {
+  // Clear any existing retry timers
+  retryTimers.forEach(t => clearTimeout(t));
+  retryTimers = [];
+
+  // Get the next event that is due now or recently passed
+  const now = Date.now();
+  const fiveMinAgo = new Date(now - 5 * 60 * 1000).toISOString();
+  const twoMinAhead = new Date(now + 2 * 60 * 1000).toISOString();
+
+  const { data } = await admin.from('calendar_events')
+    .select('event_key, event_timestamp, title, currency')
+    .is('actual', null)
+    .gte('event_timestamp', fiveMinAgo)
+    .lte('event_timestamp', twoMinAhead)
+    .order('event_timestamp', { ascending: true })
+    .limit(1);
+
+  if (!data?.length) {
+    console.log('[ff] no due events for targeted refresh');
+    return;
+  }
+
+  const target = data[0];
+  console.log(`[ff] will retry for ${target.currency} ${target.title}`);
+
+  // Retry schedule: 1s, 30s, 60s, 120s, 240s, 480s after "now"
+  const delays = [1000, 30000, 60000, 120000, 240000, 480000];
+
+  delays.forEach((delay, idx) => {
+    const timer = setTimeout(async () => {
+      const found = await targetedRefresh(target.event_key);
+      if (found) {
+        console.log(`[ff] actual found on retry #${idx + 1} — clearing remaining retries`);
+        retryTimers.forEach(t => clearTimeout(t));
+        retryTimers = [];
+      }
+    }, delay);
+    retryTimers.push(timer);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SCHEDULE NEXT EVENT REFRESH
+// ═══════════════════════════════════════════════════════════
 async function scheduleNextEventRefresh() {
   if (nextTimer) clearTimeout(nextTimer);
   if (MODE === 'read') return;
@@ -223,17 +280,18 @@ async function scheduleNextEventRefresh() {
     const delay = targetMs - Date.now();
 
     if (delay < 0) {
-      nextTimer = setTimeout(scrape, 10000);
+      // Event already passed — start retries immediately
+      await fireRetriesForNextEvent();
       return;
     }
 
     const capped = Math.min(delay, 6 * 3600 * 1000);
     const minUntil = Math.round(capped / 60000);
-    console.log(`[ff] next refresh for ${next.currency} ${next.title} in ${minUntil} min`);
+    console.log(`[ff] next event ${next.currency} ${next.title} in ${minUntil} min`);
 
     nextTimer = setTimeout(async () => {
-      console.log('[ff] TIMER fired — full refresh');
-      await scrape();
+      console.log('[ff] EVENT FIRED — starting retry loop');
+      await fireRetriesForNextEvent();
     }, capped);
   } catch (err) {
     console.error('[ff] schedule error:', err.message);
