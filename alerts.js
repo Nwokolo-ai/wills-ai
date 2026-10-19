@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { admin } = require('./db');
 const { sendEmail, eventAlertEmail, newsAlertEmail } = require('./mailer');
 const tg = require('./telegram');
@@ -10,10 +12,9 @@ function parseNum(v) {
   return isNaN(n) ? null : n;
 }
 
-function getEventTime(e) {
-  return new Date(e.event_timestamp).getTime();
-}
-
+// ═══════════════════════════════════════════════════════════
+//  PRE-EVENT ALERTS — 15 min before
+// ═══════════════════════════════════════════════════════════
 async function checkEventAlerts() {
   const now = Date.now();
   const from = new Date(now - 5 * 60 * 1000).toISOString();
@@ -27,19 +28,15 @@ async function checkEventAlerts() {
 
   if (!events?.length) return;
 
-  const { data: users } = await admin.from('profiles')
-    .select('id, username, email, timezone, email_alerts, alert_minutes, currencies, alert_impact, alert_channels, telegram_chat_id')
-    .eq('email_alerts', true);
-
   for (const ev of events) {
-    const evTime = getEventTime(ev);
+    const evTime = new Date(ev.event_timestamp).getTime();
     if (!evTime) continue;
     const minutesUntil = Math.round((evTime - now) / 60000);
     if (minutesUntil < 0 || minutesUntil > 60) continue;
 
     const refId = ev.event_key;
 
-    // ── Telegram broadcast to everyone ──
+    // ── Telegram broadcast at 15 min mark ──
     if (minutesUntil >= 14 && minutesUntil <= 16) {
       const { data: existing } = await admin.from('alert_log')
         .select('id').eq('kind', 'event').eq('ref_id', refId).limit(1).maybeSingle();
@@ -51,7 +48,11 @@ async function checkEventAlerts() {
       }
     }
 
-    // ── Per-user email alerts ──
+    // ── Email alerts per user ──
+    const { data: users } = await admin.from('profiles')
+      .select('id, username, email, timezone, email_alerts, alert_minutes, currencies, alert_impact')
+      .eq('email_alerts', true).not('email', 'is', null);
+
     for (const user of users || []) {
       const userMin = user.alert_minutes || 15;
       if (Math.abs(minutesUntil - userMin) > 1) continue;
@@ -69,20 +70,19 @@ async function checkEventAlerts() {
         .select('id').eq('user_id', user.id).eq('kind', 'event-email').eq('ref_id', userRefId).maybeSingle();
       if (existing) continue;
 
-      if (user.email) {
-        const { subject, html } = eventAlertEmail(user, { ...ev, timestamp: ev.event_timestamp }, minutesUntil);
-        const r = await sendEmail({ to: user.email, subject, html });
-        if (r.ok) {
-          await admin.from('alert_log').insert({ user_id: user.id, kind: 'event-email', ref_id: userRefId });
-        }
+      const { subject, html } = eventAlertEmail(user, { ...ev, timestamp: ev.event_timestamp }, minutesUntil);
+      const r = await sendEmail({ to: user.email, subject, html });
+      if (r.ok) {
+        await admin.from('alert_log').insert({ user_id: user.id, kind: 'event-email', ref_id: userRefId });
       }
     }
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  NEWS ALERTS
+// ═══════════════════════════════════════════════════════════
 async function checkNewsAlerts() {
-  const fs = require('fs');
-  const path = require('path');
   let news = [];
   try {
     news = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'investing_news.json'), 'utf8')).items || [];
@@ -124,26 +124,15 @@ async function checkNewsAlerts() {
   }
 }
 
-async function cleanupOldLogs() {
-  const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-  await admin.from('alert_log').delete().lt('sent_at', cutoff);
-}
-
-async function runAll() {
-  try { await checkEventAlerts(); } catch (e) { console.error('[alerts:event]', e.message); }
-  try { await checkNewsAlerts(); } catch (e) { console.error('[alerts:news]', e.message); }
-}
 // ═══════════════════════════════════════════════════════════
-//  Post-event notification (called by ffScraper when actual lands)
+//  POST-EVENT NOTIFICATION — actual released
 // ═══════════════════════════════════════════════════════════
 async function notifyNewActuals(events) {
   if (!events?.length) return;
 
   for (const ev of events) {
     if (!ev.actual) continue;
-
     const impact = (ev.impact || '').toLowerCase();
-    // Only notify for high/medium
     if (impact !== 'high' && impact !== 'medium') continue;
 
     const emoji = impact === 'high' ? '⚠️' : '🔔';
@@ -153,31 +142,29 @@ async function notifyNewActuals(events) {
     const title = `${emoji} ${ev.currency} ${ev.title}`;
     const body = `Actual: ${ev.actual} · Forecast: ${ev.forecast || '—'}${beat}`;
 
-    // ── Telegram broadcast ──
     try {
       const text = `${emoji} <b>${label} IMPACT — RELEASED</b>\n<b>${ev.currency} ${ev.title}</b>\n\nActual: <b>${ev.actual}</b>\nForecast: ${ev.forecast || '—'}\nPrevious: ${ev.previous || '—'}${beat ? `\n\n${beat}` : ''}`;
       await tg.broadcast(text);
-    } catch (e) {
-      console.error('[notify] telegram failed:', e.message);
-    }
+    } catch (e) { console.error('[notify] tg failed:', e.message); }
 
-    // ── Browser push ──
     try {
       if (global.sendPushToAll) {
-        await global.sendPushToAll({
-          title,
-          body,
-          url: '/',
-          tag: `event-${ev.event_key}`,
-        });
+        await global.sendPushToAll({ title, body, url: '/', tag: `event-${ev.event_key}` });
       }
-    } catch (e) {
-      console.error('[notify] push failed:', e.message);
-    }
+    } catch (e) { console.error('[notify] push failed:', e.message); }
 
-    console.log(`[notify] sent for ${ev.currency} ${ev.title}`);
+    console.log(`[notify] sent: ${ev.currency} ${ev.title}`);
   }
 }
 
+async function cleanupOldLogs() {
+  const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  await admin.from('alert_log').delete().lt('sent_at', cutoff);
+}
+
+async function runAll() {
+  try { await checkEventAlerts(); } catch (e) { console.error('[alerts:event]', e.message); }
+  try { await checkNewsAlerts(); } catch (e) { console.error('[alerts:news]', e.message); }
+}
+
 module.exports = { runAll, cleanupOldLogs, notifyNewActuals };
-module.exports = { runAll, cleanupOldLogs };
