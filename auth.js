@@ -140,12 +140,11 @@ async function updateProfile(accessToken, updates) {
   if (uErr || !userData?.user) throw new Error('Invalid session');
 
   const allowed = [
-  'phone','country','timezone','email_alerts','alert_minutes',
-  'currencies','alert_impact','news_categories',
-  'trading_style','experience_level','primary_instruments','broker_used',
-  'referral_source','goals','time_available','preferred_alert_channel',
-  'email','currency_filter','watchlist',
-];
+    'phone','country','timezone','email_alerts','alert_minutes',
+    'currencies','alert_impact','news_categories',
+    'email','currency_filter','watchlist','alert_channels',
+  ];
+
   const clean = {};
   for (const key of allowed) if (key in updates) clean[key] = updates[key];
   if (!Object.keys(clean).length) throw new Error('No valid fields');
