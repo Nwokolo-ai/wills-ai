@@ -19,8 +19,9 @@ if (hasToken) {
     if (!useWebhook) {
       bot.on('message', (msg) => handleMessage(msg).catch(e => console.error('[tg]', e.message)));
       bot.on('polling_error', (err) => {
-        if (!err.message.includes('EAI_AGAIN') && !err.message.includes('ECONNABORTED') && !err.message.includes('404')) {
-          console.error('[tg] polling:', err.message);
+        const m = err.message || '';
+        if (!m.includes('EAI_AGAIN') && !m.includes('ECONNABORTED') && !m.includes('404') && !m.includes('409')) {
+          console.error('[tg] polling:', m);
         }
       });
       console.log('[telegram] POLLING mode');
@@ -63,8 +64,9 @@ async function handleMessage(msg) {
     const events = await getUpcomingEvents(3);
     let body = `✅ <b>Subscribed to Will's AI alerts</b>\n\n`;
     body += `You'll receive:\n`;
-    body += `• ⚠️ High-impact events — 15 min before\n`;
-    body += `• 🔔 Medium-impact events — 15 min before\n`;
+    body += `• ⚠️ High-impact alerts — 15 min before\n`;
+    body += `• 🔔 Medium-impact alerts — 15 min before\n`;
+    body += `• 📊 Actual values right after release\n`;
     body += `• 📰 Fresh forex news\n\n`;
 
     if (events.length) {
@@ -74,9 +76,9 @@ async function handleMessage(msg) {
         const emoji = impact === 'high' ? '⚠️' : '🔔';
         const label = impact === 'high' ? 'HIGH' : 'MED';
         const when = new Date(e.event_timestamp).toLocaleString('en-GB', {
-          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
         });
-        body += `${emoji} <b>${label}</b> · ${e.currency} — ${e.title}\n   ${when}\n\n`;
+        body += `${emoji} <b>${label}</b> · ${e.currency} — ${e.title}\n   ${when} UTC\n\n`;
       }
     }
 
@@ -132,9 +134,9 @@ function eventMessage(event, minutesUntil) {
   const emoji = impact === 'high' ? '⚠️' : '🔔';
   const label = impact === 'high' ? 'HIGH IMPACT' : 'MEDIUM IMPACT';
   const time = new Date(event.timestamp || event.event_timestamp).toLocaleString('en-GB', {
-    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
   });
-  return `${emoji} <b>${label}</b> · ${event.currency}\n<b>${event.event || event.title}</b>\nin ${minutesUntil} min · ${time}\n\nForecast: <code>${event.forecast || '—'}</code>\nPrevious: <code>${event.previous || '—'}</code>`;
+  return `${emoji} <b>${label}</b> · ${event.currency}\n<b>${event.event || event.title}</b>\nin ${minutesUntil} min · ${time} UTC\n\nForecast: <code>${event.forecast || '—'}</code>\nPrevious: <code>${event.previous || '—'}</code>`;
 }
 
 function newsMessage(items) {
