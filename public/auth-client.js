@@ -1,4 +1,3 @@
-// auth-client.js — session management for the browser
 const AUTH_KEYS = {
   access: 'wills_access',
   refresh: 'wills_refresh',
