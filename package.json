@@ -8,9 +8,7 @@
     "scrape": "node ffScraper.js",
     "news": "node newsScraper.js"
   },
-  "engines": {
-    "node": ">=20.0.0"
-  },
+  "engines": { "node": ">=20.0.0" },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "biquote": "^0.3.0",
@@ -23,13 +21,6 @@
     "rss-parser": "^3.13.0",
     "web-push": "^3.6.7"
   },
-  "keywords": [
-    "forex",
-    "calendar",
-    "trading",
-    "alerts",
-    "economic-calendar"
-  ],
   "author": "Nwokolo",
   "license": "ISC"
 }
