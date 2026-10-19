@@ -11,7 +11,12 @@ const db = require('./db');
 const alerts = require('./alerts');
 const tg = require('./telegram');
 
-// Push notifications setup
+const app = express();
+const PORT = process.env.PORT || 3500;
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const DATA_DIR = path.join(__dirname, 'data');
+
+// ── Web Push setup ──
 let webpush = null;
 try {
   webpush = require('web-push');
@@ -21,20 +26,12 @@ try {
       process.env.VAPID_PUBLIC_KEY,
       process.env.VAPID_PRIVATE_KEY
     );
-    console.log('[push] web-push configured');
+    console.log('[push] configured');
   } else {
-    console.warn('[push] VAPID keys missing — push disabled');
+    console.warn('[push] VAPID keys missing');
     webpush = null;
   }
-} catch (e) {
-  console.warn('[push] web-push not installed:', e.message);
-  webpush = null;
-}
-
-const app = express();
-const PORT = process.env.PORT || 3500;
-const PUBLIC_DIR = path.join(__dirname, 'public');
-const DATA_DIR = path.join(__dirname, 'data');
+} catch (e) { webpush = null; }
 
 app.use(cors());
 app.use(express.json({ limit: '100kb' }));
@@ -49,9 +46,12 @@ app.use(express.static(PUBLIC_DIR, {
 
 function formatDateLabel(iso) {
   const d = new Date(iso + 'T00:00:00Z');
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
+  });
 }
 
+// ── API ──
 app.get('/api/config', (req, res) => {
   res.json({
     supabaseUrl: db.SUPABASE_URL,
@@ -81,6 +81,7 @@ app.get('/api/calendar', async (req, res) => {
     const events = (data || []).map(e => ({
       date: formatDateLabel(e.event_date),
       time: e.event_time || '—',
+      timestamp: e.event_timestamp,
       currency: e.currency,
       impact: e.impact,
       event: e.title,
@@ -109,6 +110,7 @@ app.get('/api/news', (req, res) => {
   }
 });
 
+// ── Auth ──
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { username, pin, email } = req.body || {};
@@ -146,6 +148,7 @@ app.put('/api/auth/profile', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// ── Telegram webhook ──
 app.post('/api/telegram/webhook', async (req, res) => {
   try {
     const msg = req.body?.message || req.body?.edited_message;
@@ -153,27 +156,23 @@ app.post('/api/telegram/webhook', async (req, res) => {
   } catch (err) { console.error('[webhook]', err.message); }
   res.sendStatus(200);
 });
-// ── Push subscription endpoint ──
+
+// ── Push ──
 app.post('/api/push/subscribe', async (req, res) => {
   try {
     const { subscription, userId } = req.body || {};
     if (!subscription?.endpoint || !subscription?.keys) {
       return res.status(400).json({ error: 'Invalid subscription' });
     }
-
     const row = {
       endpoint: subscription.endpoint,
       p256dh: subscription.keys.p256dh,
       auth: subscription.keys.auth,
       user_id: userId || null,
     };
-
-    const { error } = await db.admin
-      .from('push_subscriptions')
-      .upsert(row, { onConflict: 'endpoint' });
-
+    const { error } = await db.admin.from('push_subscriptions').upsert(row, { onConflict: 'endpoint' });
     if (error) throw error;
-    console.log('[push] subscribed:', subscription.endpoint.slice(0, 40) + '...');
+    console.log('[push] subscribed');
     res.json({ ok: true });
   } catch (err) {
     console.error('[push] subscribe error:', err.message);
@@ -181,19 +180,13 @@ app.post('/api/push/subscribe', async (req, res) => {
   }
 });
 
-// ── Send push to all subscribers (internal use / testing) ──
 async function sendPushToAll(payload) {
   if (!webpush) return { sent: 0, failed: 0 };
-
-  const { data: subs } = await db.admin
-    .from('push_subscriptions')
-    .select('*');
-
+  const { data: subs } = await db.admin.from('push_subscriptions').select('*');
   if (!subs?.length) return { sent: 0, failed: 0 };
 
   let sent = 0, failed = 0;
   const toDelete = [];
-
   for (const sub of subs) {
     try {
       await webpush.sendNotification(
@@ -203,26 +196,18 @@ async function sendPushToAll(payload) {
       sent++;
     } catch (err) {
       failed++;
-      // 410 Gone = subscription is dead, remove it
-      if (err.statusCode === 410 || err.statusCode === 404) {
-        toDelete.push(sub.endpoint);
-      }
+      if (err.statusCode === 410 || err.statusCode === 404) toDelete.push(sub.endpoint);
     }
   }
-
   if (toDelete.length) {
     await db.admin.from('push_subscriptions').delete().in('endpoint', toDelete);
-    console.log('[push] removed', toDelete.length, 'dead subscriptions');
   }
-
   console.log(`[push] sent=${sent} failed=${failed}`);
   return { sent, failed };
 }
 
-// Expose globally so alerts.js can use it
 global.sendPushToAll = sendPushToAll;
 
-// ── Test endpoint ──
 app.get('/api/push/test', async (req, res) => {
   const result = await sendPushToAll({
     title: "Will's AI — Test",
@@ -232,12 +217,13 @@ app.get('/api/push/test', async (req, res) => {
   res.json(result);
 });
 
-// Daily safety-net full refresh at 4 AM (in case per-event timer missed anything)
+// ── Cron ──
 cron.schedule('0 4 * * *', async () => {
-  console.log('[cron] daily full refresh');
-  try { const { scrapeFull } = require('./ffScraper'); await scrapeFull(); }
-  catch (e) { console.error('[cron] daily:', e.message); }
+  console.log('[cron] daily refresh');
+  try { const { scrape } = require('./ffScraper'); await scrape(); }
+  catch (e) { console.error('[cron] calendar:', e.message); }
 });
+
 cron.schedule('*/30 * * * *', async () => {
   console.log('[cron] news fetch');
   try { const { fetchAll } = require('./newsScraper'); await fetchAll(); }
@@ -253,11 +239,15 @@ cron.schedule('0 3 * * *', async () => {
   try { await alerts.cleanupOldLogs(); } catch {}
 });
 
+// ── Boot ──
 setTimeout(async () => {
   console.log('[boot] initial fetch');
-  try { const { scrape } = require('./ffScraper'); await scrape(); } catch (e) { console.error('[boot] cal:', e.message); }
-  try { const { fetchAll } = require('./newsScraper'); await fetchAll(); } catch (e) { console.error('[boot] news:', e.message); }
-  try { await alerts.runAll(); console.log('[boot] alert check done'); } catch (e) { console.error('[boot] alerts:', e.message); }
+  try { const { scrape } = require('./ffScraper'); await scrape(); }
+  catch (e) { console.error('[boot] cal:', e.message); }
+  try { const { fetchAll } = require('./newsScraper'); await fetchAll(); }
+  catch (e) { console.error('[boot] news:', e.message); }
+  try { await alerts.runAll(); console.log('[boot] alert check done'); }
+  catch (e) { console.error('[boot] alerts:', e.message); }
 }, 5000);
 
 app.get(/.*/, (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
@@ -270,6 +260,6 @@ app.listen(PORT, '0.0.0.0', () => {
   if (PUBLIC_URL && tg.hasToken && tg.useWebhook) {
     tg.setWebhook(PUBLIC_URL).catch(() => {});
   } else if (tg.hasToken && !tg.useWebhook) {
-    console.log('[boot] Telegram POLLING mode');
+    console.log('[boot] Telegram POLLING');
   }
 });
