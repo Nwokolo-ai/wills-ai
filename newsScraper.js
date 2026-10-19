@@ -10,13 +10,13 @@ const rss = new Parser({
 const OUT = path.join(__dirname, 'data', 'investing_news.json');
 
 const FEEDS = {
-  forex: 'https://www.investing.com/rss/news_1.rss',
-  forex_news: 'https://www.investing.com/rss/news_14.rss',
-  crypto: 'https://www.investing.com/rss/news_301.rss',
+  forex:       'https://www.investing.com/rss/news_1.rss',
+  forex_news:  'https://www.investing.com/rss/news_14.rss',
+  crypto:      'https://www.investing.com/rss/news_301.rss',
   commodities: 'https://www.investing.com/rss/news_11.rss',
-  economy: 'https://www.investing.com/rss/news_95.rss',
-  stocks: 'https://www.investing.com/rss/news_25.rss',
-  markets: 'https://www.investing.com/rss/news_285.rss',
+  economy:     'https://www.investing.com/rss/news_95.rss',
+  stocks:      'https://www.investing.com/rss/news_25.rss',
+  markets:     'https://www.investing.com/rss/news_285.rss',
 };
 
 async function fetchAll() {
@@ -42,7 +42,7 @@ async function fetchAll() {
       }
       console.log(`[news:${category}] ${added}`);
     } catch (err) {
-      console.error(`[news:${category}] error: ${err.message}`);
+      console.error(`[news:${category}] ${err.message}`);
     }
   }
 
