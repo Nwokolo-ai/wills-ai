@@ -39,7 +39,7 @@ p{font-size:14px;color:#8b949e;margin:0 0 14px}
 .event .time{font-size:11px;color:#8b949e;margin-top:2px}
 .footer{font-size:11px;color:#57606a;text-align:center;margin-top:20px}
 </style></head><body><div class="wrap"><div class="brand">◈ Will's AI</div>${bodyHtml}
-<div class="footer">You received this because you signed up at Will's AI.<br><a href="${APP_URL}" style="color:#8b949e">${APP_URL}</a></div>
+<div class="footer">You received this because you signed up at Will's AI.</div>
 </div></body></html>`;
 }
 
@@ -50,16 +50,15 @@ function welcomeEmail(profile, upcomingEvents) {
     const impact = (e.impact || 'low').toLowerCase();
     const label = impact === 'high' ? 'HIGH' : 'MEDIUM';
     const time = new Date(e.event_timestamp).toLocaleString('en-GB', {
-      timeZone: profile.timezone || 'UTC',
-      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+      timeZone: 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     });
-    return `<div class="event ${impact}"><div class="label">${label} · ${e.currency}</div><div class="name">${e.title}</div><div class="time">${time}</div></div>`;
+    return `<div class="event ${impact}"><div class="label">${label} · ${e.currency}</div><div class="name">${e.title}</div><div class="time">${time} UTC</div></div>`;
   }).join('') || '<p>No upcoming events right now.</p>';
 
   const body = `
     <div class="card">
       <h1>Welcome to Will's AI, ${username}! 👋</h1>
-      <p>Your account is ready. You'll receive alerts for high and medium impact events, 15 minutes before they fire.</p>
+      <p>Your account is ready. You'll receive alerts for high and medium impact events, 15 minutes before they fire, plus notifications after each release.</p>
       <div style="margin-top:16px;">
         <div class="kv"><span class="k">Username</span><span class="v">${username}</span></div>
         <div class="kv"><span class="k">Email</span><span class="v">${email}</span></div>
@@ -79,7 +78,7 @@ function eventAlertEmail(profile, event, minutesUntil) {
   const label = impact === 'high' ? 'HIGH IMPACT' : 'MEDIUM IMPACT';
   const emoji = impact === 'high' ? '⚠️' : '🔔';
   const time = new Date(event.timestamp || event.event_timestamp).toLocaleString('en-GB', {
-    timeZone: profile.timezone || 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    timeZone: 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
   });
   const body = `
     <div class="card">
@@ -87,7 +86,7 @@ function eventAlertEmail(profile, event, minutesUntil) {
       <div class="event ${impact}">
         <div class="label">${label} · ${event.currency}</div>
         <div class="name">${event.event || event.title}</div>
-        <div class="time">${time}</div>
+        <div class="time">${time} UTC</div>
       </div>
       <div class="kv"><span class="k">Forecast</span><span class="v">${event.forecast || '—'}</span></div>
       <div class="kv"><span class="k">Previous</span><span class="v">${event.previous || '—'}</span></div>
