@@ -178,6 +178,52 @@
     <div id="eventModalContent"></div>
   </div>
 </div>
+<!-- Create Strategy Modal -->
+<div class="modal-overlay" id="createStrategyModal">
+  <div class="modal-box" style="max-width: 700px;">
+    <button class="modal-close" id="closeStrategyModal" aria-label="Close">✕</button>
+    
+    <h2 style="margin-bottom: 16px;">Create Strategy</h2>
+    
+    <div class="auth-form" style="gap: 12px;">
+      
+      <label>Strategy Name
+        <input type="text" id="stratName" placeholder="e.g., Gold Breakout 5m" required />
+      </label>
+
+      <label>Description
+        <input type="text" id="stratDesc" placeholder="Briefly explain how it works..." />
+      </label>
+
+      <div style="display: flex; gap: 16px; margin-top: 8px;">
+        <label style="flex: 1; flex-direction: row; align-items: center; gap: 8px;">
+          <input type="checkbox" id="stratIsPublic" checked style="width: auto; padding: 0;" />
+          Publish to Public Marketplace
+        </label>
+      </div>
+
+      <div style="display: flex; gap: 16px; margin-top: 8px; background: var(--bg3); padding: 12px; border-radius: 8px;">
+        <label style="flex: 1; flex-direction: row; align-items: center; gap: 8px;">
+          <input type="radio" name="stratType" value="manual" checked />
+          📊 Manual Logic
+        </label>
+        <label style="flex: 1; flex-direction: row; align-items: center; gap: 8px;">
+          <input type="radio" name="stratType" value="ai_assisted" />
+          🤖 AI Assisted
+        </label>
+      </div>
+
+      <label style="margin-top: 8px;">
+        Strategy Code (JavaScript)
+        <textarea id="stratCode" rows="10" style="width: 100%; background: #0d1117; color: #00f5a0; font-family: monospace; padding: 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px;" placeholder="// Example:&#10;const data = await getMarketData('BTCUSDT', '5m');&#10;if (data.close > data.open) {&#10;  sendSignal('BUY', 'BTCUSDT', data.close, 'Bullish candle');&#10;}"></textarea>
+      </label>
+
+      <div class="auth-error" id="stratError"></div>
+      
+      <button type="button" class="auth-submit" id="saveStrategyBtn" style="margin-top: 10px;">Save Strategy</button>
+    </div>
+  </div>
+</div>
 
 <script src="/auth-client.js"></script>
 <script src="/app.js"></script>
