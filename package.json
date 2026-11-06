@@ -4,10 +4,10 @@
   "description": "Will's AI — Live economic calendar, news, and event alerts",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "scrape": "node ffScraper.js",
-    "news": "node newsScraper.js"
-  },
+  "start": "node server.js & node orchestrator/server.js",
+  "scrape": "node ffScraper.js",
+  "news": "node newsScraper.js"
+},
   "engines": { "node": ">=20.0.0" },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
