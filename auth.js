@@ -130,11 +130,27 @@ async function refresh(refreshToken) {
 async function getProfile(accessToken) {
   const { data: userData, error: uErr } = await admin.auth.getUser(accessToken);
   if (uErr || !userData?.user) throw new Error('Invalid session');
+  
   const { data, error } = await admin.from('profiles').select('*').eq('id', userData.user.id).single();
-  if (error) throw new Error('Profile not found');
+  
+  if (error) {
+    // If profile is missing, create it automatically (Self-Healing)
+    if (error.code === 'PGRST116') {
+      const defaultUsername = userData.user.user_metadata?.username || userData.user.email.split('@')[0];
+      const { data: newProfile, error: createErr } = await admin.from('profiles').insert({
+        id: userData.user.id,
+        username: defaultUsername,
+        email: userData.user.email
+      }).select().single();
+
+      if (createErr) throw new Error('Could not create profile: ' + createErr.message);
+      return newProfile;
+    }
+    throw new Error('Profile not found: ' + error.message);
+  }
+  
   return data;
 }
-
 async function updateProfile(accessToken, updates) {
   const { data: userData, error: uErr } = await admin.auth.getUser(accessToken);
   if (uErr || !userData?.user) throw new Error('Invalid session');
