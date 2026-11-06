@@ -15,6 +15,12 @@ const app = express();
 const PORT = process.env.PORT || 3500;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
+const STRAT_DIR = path.join(DATA_DIR, 'strategies');
+
+// Ensure strategy directory exists
+if (!fs.existsSync(STRAT_DIR)) {
+  fs.mkdirSync(STRAT_DIR, { recursive: true });
+}
 
 // ── Web Push setup ──
 let webpush = null;
@@ -34,7 +40,7 @@ try {
 } catch (e) { webpush = null; }
 
 app.use(cors());
-app.use(express.json({ limit: '100kb' }));
+app.use(express.json({ limit: '2mb' })); // Increased limit for strategy code
 app.use(express.static(PUBLIC_DIR, {
   etag: false, lastModified: false,
   setHeaders: (res, fp) => {
@@ -146,6 +152,107 @@ app.put('/api/auth/profile', async (req, res) => {
     if (!token) return res.status(401).json({ error: 'No token' });
     res.json({ profile: await auth.updateProfile(token, req.body || {}) });
   } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  STRATEGY MARKETPLACE API
+// ═══════════════════════════════════════════════════════════
+
+// 1. Save a new Strategy
+app.post('/api/strategies', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+    
+    const { data: { user }, error: authErr } = await db.admin.auth.getUser(token);
+    if (authErr || !user) throw new Error('Invalid session');
+
+    const { name, description, is_public, strategy_type, code } = req.body;
+    
+    const { data, error } = await db.admin.from('strategies').insert({
+      creator_id: user.id,
+      name,
+      description,
+      is_public,
+      strategy_type,
+      code,
+      status: 'inactive'
+    }).select().single();
+
+    if (error) throw error;
+    res.json({ strategy: data });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 2. Launch a Strategy (Sends to Orchestrator)
+app.post('/api/strategies/:id/launch', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { id } = req.params;
+    const { user_ai_key } = req.body;
+
+    // Fetch strategy
+    const { data: strategy, error } = await db.admin.from('strategies').select('*').eq('id', id).single();
+    if (error || !strategy) throw new Error('Strategy not found');
+
+    // Check if AI key is required
+    if (strategy.strategy_type === 'ai_assisted' && !user_ai_key) {
+      return res.status(400).json({ error: 'This is an AI strategy. You must provide your own AI API key.' });
+    }
+
+    // Write code to a file for the Orchestrator
+    const filePath = path.join(STRAT_DIR, `${id}.js`);
+    fs.writeFileSync(filePath, strategy.code);
+
+    // Send to Orchestrator (running on port 7400)
+    const orchRes = await fetch('http://127.0.0.1:7400/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'strategy',
+        cwd: STRAT_DIR,
+        opts: { 
+          strategyFile: `${id}.js`, 
+          pollMs: 60000,
+          strategyId: id,
+          userAiKey: user_ai_key || ''
+        }
+      })
+    });
+
+    const orchData = await orchRes.json();
+    if (!orchRes.ok) throw new Error(orchData.error || 'Failed to start orchestrator');
+
+    // Update DB status
+    await db.admin.from('strategies').update({ status: 'running' }).eq('id', id);
+
+    res.json({ success: true, job_id: orchData.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Stop a Strategy
+app.post('/api/strategies/:id/stop', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { id } = req.params;
+    
+    // Tell orchestrator to stop the job
+    // (Note: Ideally you store the job_id in the DB so you know what to stop)
+    // For now, we just update the DB status.
+    await db.admin.from('strategies').update({ status: 'stopped' }).eq('id', id);
+    
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Telegram webhook ──
