@@ -370,3 +370,32 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log('[boot] Telegram POLLING');
   }
 });
+// 4. Get Strategy Stats (Win Rate & PnL)
+app.get('/api/strategies/:id/stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get all closed trades for this strategy
+    const { data: trades, error } = await db.admin.from('trades')
+      .select('pnl_pct')
+      .eq('strategy_id', id)
+      .eq('status', 'CLOSED');
+
+    if (error) throw error;
+
+    if (!trades || trades.length === 0) {
+      return res.json({ winRate: 0, totalPnl: 0, totalTrades: 0 });
+    }
+
+    const winningTrades = trades.filter(t => t.pnl_pct > 0).length;
+    const totalPnl = trades.reduce((sum, t) => sum + t.pnl_pct, 0);
+    
+    res.json({
+      winRate: ((winningTrades / trades.length) * 100).toFixed(1),
+      totalPnl: totalPnl.toFixed(2),
+      totalTrades: trades.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
