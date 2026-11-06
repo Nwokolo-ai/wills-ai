@@ -745,17 +745,33 @@ function openStrategyModal() {
   }
   $('stratError').classList.remove('show');
   $('createStrategyModal').classList.add('open');
+  showStrategyView('guide'); // Always open to the guide first
 }
 
 function closeStrategyModal() {
   $('createStrategyModal').classList.remove('open');
 }
 
+function showStrategyView(view) {
+  if (view === 'guide') {
+    $('viewStratGuide').style.display = 'block';
+    $('viewStratEditor').style.display = 'none';
+  } else {
+    $('viewStratGuide').style.display = 'none';
+    $('viewStratEditor').style.display = 'block';
+  }
+}
+
+// Button Listeners
 $('closeStrategyModal')?.addEventListener('click', closeStrategyModal);
 $('createStrategyModal')?.addEventListener('click', (e) => {
   if (e.target.id === 'createStrategyModal') closeStrategyModal();
 });
 
+$('btnStartCoding')?.addEventListener('click', () => showStrategyView('editor'));
+$('btnBackToGuide')?.addEventListener('click', () => showStrategyView('guide'));
+
+// Save Strategy
 $('saveStrategyBtn')?.addEventListener('click', async () => {
   const btn = $('saveStrategyBtn');
   const errEl = $('stratError');
