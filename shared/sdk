@@ -1,0 +1,138 @@
+// ~/ai-dev/shared/sdk.js
+const BiquoteModule = require('biquote');
+const Biquote = BiquoteModule.Biquote || BiquoteModule.default || BiquoteModule;
+const { createClient } = require('@supabase/supabase-js');
+
+const bq = new Biquote();
+
+// The Orchestrator passes these environment variables when launching a strategy
+const STRATEGY_ID = process.env.STRATEGY_ID;
+const supabase = createClient(
+  process.env.SUPABASE_URL || 'https://placeholder.supabase.co', 
+  process.env.SUPABASE_SECRET_KEY || 'placeholder_key'
+);
+
+// ═══════════════════════════════════════════════════════════
+// 1. MARKET DATA
+// ═══════════════════════════════════════════════════════════
+async function getMarketData(symbol, timeframe = '1h', limit = 100) {
+  try {
+    const candles = await bq.ohlcv({ symbol, interval: timeframe, limit });
+    return candles.map(c => ({
+      time: c[0] || c.time, 
+      open: parseFloat(c[1] || c.open), 
+      high: parseFloat(c[2] || c.high), 
+      low: parseFloat(c[3] || c.low), 
+      close: parseFloat(c[4] || c.close), 
+      volume: parseFloat(c[5] || c.volume)
+    }));
+  } catch (e) {
+    console.error('[SDK] Biquote error:', e.message);
+    return [];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 2. NEWS & EVENTS
+// ═══════════════════════════════════════════════════════════
+async function getUpcomingEvents(currency = 'USD', limit = 5) {
+  const now = new Date().toISOString();
+  const { data } = await supabase.from('calendar_events')
+    .select('title, currency, impact, event_timestamp, forecast, previous')
+    .eq('currency', currency)
+    .gt('event_timestamp', now)
+    .order('event_timestamp', { ascending: true })
+    .limit(limit);
+  return data || [];
+}
+
+async function getLatestNews(category = 'forex', limit = 5) {
+  try {
+    const res = await fetch('http://localhost:3500/api/news'); 
+    const data = await res.json();
+    return (data.items || []).filter(n => n.category === category).slice(0, limit);
+  } catch (e) {
+    return [];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 3. TRADE TRACKING (Calculates PnL for the Marketplace Rating)
+// ═══════════════════════════════════════════════════════════
+async function openTrade(symbol, direction, entryPrice) {
+  const { data, error } = await supabase.from('trades').insert({
+    strategy_id: STRATEGY_ID,
+    symbol, 
+    direction, 
+    entry_price: entryPrice, 
+    status: 'OPEN'
+  }).select().single();
+  
+  if (error) console.error('[SDK] openTrade error:', error);
+  return data?.id; 
+}
+
+async function closeTrade(tradeId, exitPrice) {
+  const { data: trade } = await supabase.from('trades').select('*').eq('id', tradeId).single();
+  if (!trade) return;
+
+  const isBuy = trade.direction === 'BUY';
+  const pnl = isBuy 
+    ? ((exitPrice - trade.entry_price) / trade.entry_price) * 100
+    : ((trade.entry_price - exitPrice) / trade.entry_price) * 100;
+
+  await supabase.from('trades').update({
+    exit_price: exitPrice,
+    pnl_pct: pnl,
+    status: 'CLOSED',
+    closed_at: new Date().toISOString()
+  }).eq('id', tradeId);
+
+  sendSignal('CLOSE', trade.symbol, exitPrice, `Closed trade. PnL: ${pnl.toFixed(2)}%`);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 4. SIGNALS & LOGGING
+// ═══════════════════════════════════════════════════════════
+function sendSignal(action, symbol, price, reason) {
+  console.log(`[SIGNAL_EMIT] ${JSON.stringify({ action, symbol, price, reason, timestamp: Date.now() })}`);
+}
+
+function log(message) {
+  console.log(`[STRATEGY_LOG] ${message}`);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 5. AI ANALYSIS (Bring Your Own Key)
+// ═══════════════════════════════════════════════════════════
+async function askAI(prompt, systemPrompt = "Analyze and output BUY, SELL, or WAIT.") {
+  const userKey = process.env.USER_AI_KEY;
+  if (!userKey) throw new Error("No AI API Key provided by user.");
+
+  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${userKey}` },
+    body: JSON.stringify({
+      model: 'open-mistral-7b',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.2
+    })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.choices[0].message.content.trim();
+}
+
+module.exports = { 
+  getMarketData, 
+  getUpcomingEvents, 
+  getLatestNews, 
+  openTrade, 
+  closeTrade, 
+  sendSignal, 
+  log, 
+  askAI 
+};
