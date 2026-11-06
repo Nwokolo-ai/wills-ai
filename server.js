@@ -154,6 +154,32 @@ app.put('/api/auth/profile', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// Get Strategies (Filtered by Public/Private)
+app.get('/api/strategies', async (req, res) => {
+  try {
+    const { is_public, type } = req.query;
+    let query = db.admin.from('strategies').select('*, profiles(username)');
+    
+    if (is_public === 'true') {
+      query = query.eq('is_public', true);
+    } else {
+      const token = (req.headers.authorization || '').replace('Bearer ', '');
+      if (!token) return res.status(401).json({ error: 'Unauthorized' });
+      const { data: { user } } = await db.admin.auth.getUser(token);
+      if (!user) return res.status(401).json({ error: 'Invalid session' });
+      query = query.eq('creator_id', user.id);
+    }
+
+    if (type) query = query.eq('strategy_type', type);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    
+    res.json({ strategies: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 // ═══════════════════════════════════════════════════════════
 //  STRATEGY MARKETPLACE API
 // ═══════════════════════════════════════════════════════════
