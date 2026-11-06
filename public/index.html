@@ -8,8 +8,8 @@
 <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="/styles.css" />
 <style>
-  #authPanel, #prefPanel, #authOverlay, #eventModal { display: none !important; }
-  #authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open { display: flex !important; }
+  #authPanel, #prefPanel, #authOverlay, #eventModal, #createStrategyModal { display: none !important; }
+  #authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open, #createStrategyModal.open { display: flex !important; }
 </style>
 </head>
 <body data-theme="dark">
@@ -43,6 +43,7 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="calendar">📅 Calendar</button>
   <button class="tab-btn" data-tab="news">📰 News</button>
+  <button class="tab-btn" data-tab="strategies">🤖 Strategies</button>
   <span class="last-updated" id="lastUpdated">—</span>
 </div>
 
@@ -113,6 +114,25 @@
   </div>
 </div>
 
+<div class="panel" id="panel-strategies">
+  <!-- Main Tabs: Public vs Private -->
+  <div class="news-controls" style="border-bottom: none; padding-bottom: 0;">
+    <button class="day-btn active" id="btnPublic" onclick="setMainTab('public')">🌍 Public Strategies</button>
+    <button class="day-btn" id="btnPrivate" onclick="setMainTab('private')">🔒 My Private Strategies</button>
+    <button class="day-btn" style="margin-left:auto; background:var(--accent); color:var(--bg); font-weight:700;" onclick="openStrategyModal()">+ Create Strategy</button>
+  </div>
+
+  <!-- Sub Tabs: Manual vs AI Assist -->
+  <div class="news-controls" style="padding-top: 8px;">
+    <button class="day-btn active" id="btnManual" onclick="setSubTab('manual')">📊 Manual Logic</button>
+    <button class="day-btn" id="btnAI" onclick="setSubTab('ai_assisted')">🤖 AI Assisted</button>
+  </div>
+
+  <div class="news-grid" id="strategyGrid">
+    <div class="empty">Loading strategies…</div>
+  </div>
+</div>
+
 <div class="auth-overlay" id="authOverlay"></div>
 
 <aside class="auth-panel" id="authPanel">
@@ -178,6 +198,7 @@
     <div id="eventModalContent"></div>
   </div>
 </div>
+
 <!-- Create Strategy Modal -->
 <div class="modal-overlay" id="createStrategyModal">
   <div class="modal-box" style="max-width: 700px;">
@@ -215,7 +236,7 @@
 
       <label style="margin-top: 8px;">
         Strategy Code (JavaScript)
-        <textarea id="stratCode" rows="10" style="width: 100%; background: #0d1117; color: #00f5a0; font-family: monospace; padding: 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px;" placeholder="// Example:&#10;const data = await getMarketData('BTCUSDT', '5m');&#10;if (data.close > data.open) {&#10;  sendSignal('BUY', 'BTCUSDT', data.close, 'Bullish candle');&#10;}"></textarea>
+        <textarea id="stratCode" rows="10" style="width: 100%; background: #0d1117; color: #00f5a0; font-family: ui-monospace, monospace; padding: 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px;" placeholder="// Example:&#10;const data = await getMarketData('BTCUSDT', '5m');&#10;if (data.close > data.open) {&#10;  sendSignal('BUY', 'BTCUSDT', data.close, 'Bullish candle');&#10;}"></textarea>
       </label>
 
       <div class="auth-error" id="stratError"></div>
