@@ -1003,3 +1003,73 @@ pollForNewActuals();
   setInterval(() => { if (dayFilter !== 'all') renderCalendar(); }, 30000);
   setInterval(updateLastUpdated, 30000);
 })();
+// ── STRATEGY MODAL LOGIC ──
+
+function openStrategyModal() {
+  if (!Auth.isLoggedIn) {
+    alert("Please log in to create a strategy.");
+    return;
+  }
+  document.getElementById('stratError').classList.remove('show');
+  document.getElementById('createStrategyModal').classList.add('open');
+}
+
+function closeStrategyModal() {
+  document.getElementById('createStrategyModal').classList.remove('open');
+}
+
+document.getElementById('closeStrategyModal')?.addEventListener('click', closeStrategyModal);
+document.getElementById('createStrategyModal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'createStrategyModal') closeStrategyModal();
+});
+
+document.getElementById('saveStrategyBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('saveStrategyBtn');
+  const errEl = document.getElementById('stratError');
+  errEl.classList.remove('show');
+
+  const name = document.getElementById('stratName').value.trim();
+  const description = document.getElementById('stratDesc').value.trim();
+  const is_public = document.getElementById('stratIsPublic').checked;
+  const strategy_type = document.querySelector('input[name="stratType"]:checked').value;
+  const code = document.getElementById('stratCode').value.trim();
+
+  if (!name || !code) {
+    errEl.textContent = "Name and Code are required.";
+    errEl.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true; 
+  btn.textContent = 'Saving…';
+
+  try {
+    const res = await fetch('/api/strategies', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${Auth.accessToken}`
+      },
+      body: JSON.stringify({ name, description, is_public, strategy_type, code })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save strategy');
+
+    closeStrategyModal();
+    // Reset form
+    document.getElementById('stratName').value = '';
+    document.getElementById('stratDesc').value = '';
+    document.getElementById('stratCode').value = '';
+    
+    // Refresh the grid to show the new strategy
+    loadStrategies();
+    
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.add('show');
+  } finally {
+    btn.disabled = false; 
+    btn.textContent = 'Save Strategy';
+  }
+});
