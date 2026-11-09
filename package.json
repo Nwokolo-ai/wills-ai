@@ -7,7 +7,7 @@
   "start": "node server.js & node orchestrator/server.js",
   "scrape": "node ffScraper.js",
   "news": "node newsScraper.js"
-},
+}
   "engines": { "node": ">=20.0.0" },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
