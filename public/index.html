@@ -179,8 +179,41 @@
         <span>Already have an account?</span>
         <button type="button" class="auth-link" id="toLogin">Log in →</button>
       </div>
+      
     </form>
   </div>
+  <!-- Forgot Password View -->
+<div class="auth-view" id="viewForgot">
+  <h2>Reset your PIN</h2>
+  <p class="auth-sub">Enter your username and email to receive a reset code.</p>
+  
+  <!-- Step 1: Request Code -->
+  <form id="formForgot" class="auth-form">
+    <label>Username
+      <input type="text" id="forgotUsername" placeholder="Your username" required />
+    </label>
+    <label>Email
+      <input type="email" id="forgotEmail" placeholder="you@example.com" required />
+    </label>
+    <div class="auth-error" id="forgotError"></div>
+    <button type="submit" class="auth-submit" id="forgotSubmit">Send Reset Code</button>
+    <div class="auth-links">
+      <button type="button" class="auth-link" id="toLoginFromForgot">← Back to login</button>
+    </div>
+  </form>
+
+  <!-- Step 2: Enter Code & New PIN (Hidden initially) -->
+  <form id="formReset" class="auth-form" style="display: none;">
+    <label>Reset Code
+      <input type="text" id="resetCode" placeholder="123456" inputmode="numeric" required />
+    </label>
+    <label>New PIN
+      <input type="password" id="resetNewPin" placeholder="At least 6 digits" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" required />
+    </label>
+    <div class="auth-error" id="resetError"></div>
+    <button type="submit" class="auth-submit" id="resetSubmit">Update PIN</button>
+  </form>
+</div>
 </aside>
 
 <aside class="pref-panel" id="prefPanel">
