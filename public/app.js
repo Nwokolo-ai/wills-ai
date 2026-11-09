@@ -1218,3 +1218,84 @@ pollForNewActuals();
   setInterval(() => { if (dayFilter !== 'all') renderCalendar(); }, 30000);
   setInterval(updateLastUpdated, 30000);
 })();
+// ── FORGOT PASSWORD LOGIC ──
+
+$('toForgot')?.addEventListener('click', () => {
+  showAuthView('forgot');
+  $('formForgot').style.display = 'flex';
+  $('formReset').style.display = 'none';
+  $('forgotError').classList.remove('show');
+  $('resetError').classList.remove('show');
+});
+
+$('toLoginFromForgot')?.addEventListener('click', () => showAuthView('login'));
+
+// Step 1: Request Code
+$('formForgot')?.addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('forgotSubmit');
+  const errEl = $('forgotError');
+  errEl.classList.remove('show');
+
+  const username = $('forgotUsername').value.trim();
+  const email = $('forgotEmail').value.trim();
+
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+
+  try {
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, email })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    // Switch to Step 2
+    $('formForgot').style.display = 'none';
+    $('formReset').style.display = 'flex';
+    
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send Reset Code';
+  }
+});
+
+// Step 2: Reset PIN
+$('formReset')?.addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('resetSubmit');
+  const errEl = $('resetError');
+  errEl.classList.remove('show');
+
+  const username = $('forgotUsername').value.trim();
+  const code = $('resetCode').value.trim();
+  const newPin = $('resetNewPin').value.trim();
+
+  btn.disabled = true;
+  btn.textContent = 'Updating…';
+
+  try {
+    const res = await fetch('/api/auth/reset-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, code, newPin })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    alert('✅ PIN updated successfully! You can now log in.');
+    showAuthView('login');
+    
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Update PIN';
+  }
+});
