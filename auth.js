@@ -171,4 +171,62 @@ async function updateProfile(accessToken, updates) {
   return data;
 }
 
-module.exports = { signup, login, refresh, getProfile, updateProfile };
+// 1. Request Reset Code
+async function requestPasswordReset(username, email) {
+  if (!username || !email) throw new Error('Username and email required');
+
+  const { data: profile } = await admin.from('profiles')
+    .select('id, username, email')
+    .eq('username', username)
+    .single();
+
+  if (!profile || profile.email.toLowerCase() !== email.toLowerCase()) {
+    throw new Error('No account found with that username and email combination');
+  }
+
+  // Generate a 6-digit code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expires = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 mins
+
+  await admin.from('profiles').update({
+    reset_code: code,
+    reset_expires: expires
+  }).eq('id', profile.id);
+
+  const { sendEmail, resetPinEmail } = require('./mailer');
+  const { subject, html } = resetPinEmail(profile.username, code);
+  await sendEmail({ to: profile.email, subject, html });
+
+  return { success: true, message: 'Reset code sent to email' };
+}
+
+// 2. Reset PIN with Code
+async function resetPin(username, code, newPin) {
+  const pErr = validatePin(newPin);
+  if (pErr) throw new Error(pErr);
+
+  const { data: profile } = await admin.from('profiles')
+    .select('id, reset_code, reset_expires')
+    .eq('username', username)
+    .single();
+
+  if (!profile) throw new Error('User not found');
+  if (!profile.reset_code || profile.reset_code !== code) throw new Error('Invalid reset code');
+  if (new Date() > new Date(profile.reset_expires)) throw new Error('Reset code has expired');
+
+  // Update password in Supabase Auth
+  const { error: authErr } = await admin.auth.admin.updateUserById(profile.id, {
+    password: newPin
+  });
+  if (authErr) throw new Error('Failed to update PIN: ' + authErr.message);
+
+  // Clear the reset code
+  await admin.from('profiles').update({
+    reset_code: null,
+    reset_expires: null
+  }).eq('id', profile.id);
+
+  return { success: true, message: 'PIN successfully reset' };
+}
+
+module.exports = { signup, login, refresh, getProfile, updateProfile, requestPasswordReset, resetPin };
