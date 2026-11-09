@@ -113,4 +113,17 @@ async function sendEmail({ to, subject, html }) {
   }
 }
 
-module.exports = { sendEmail, welcomeEmail, eventAlertEmail, newsAlertEmail };
+function resetPinEmail(username, code) {
+  const body = `
+    <div class="card">
+      <h1>Reset your PIN</h1>
+      <p>Hi ${username}, you requested to reset your PIN. Here is your 6-digit reset code:</p>
+      <div style="text-align: center; margin: 20px 0;">
+        <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #00f5a0; background: #0d1117; padding: 10px 20px; border-radius: 8px;">${code}</span>
+      </div>
+      <p>This code will expire in 15 minutes. If you did not request this, you can safely ignore this email.</p>
+    </div>`;
+  return { subject: "Will's AI — PIN Reset Code", html: baseTemplate("Reset PIN", body) };
+}
+
+module.exports = { sendEmail, welcomeEmail, eventAlertEmail, newsAlertEmail, resetPinEmail };
