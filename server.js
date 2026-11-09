@@ -180,6 +180,19 @@ app.get('/api/strategies', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { username, email } = req.body || {};
+    res.json(await auth.requestPasswordReset(username, email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/auth/reset-pin', async (req, res) => {
+  try {
+    const { username, code, newPin } = req.body || {};
+    res.json(await auth.resetPin(username, code, newPin));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 // ═══════════════════════════════════════════════════════════
 //  STRATEGY MARKETPLACE API
 // ═══════════════════════════════════════════════════════════
