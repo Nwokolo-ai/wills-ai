@@ -17,7 +17,11 @@ const supabase = createClient(
 // ═══════════════════════════════════════════════════════════
 async function getMarketData(symbol, timeframe = '1h', limit = 100) {
   try {
-    const candles = await bq.ohlcv({ symbol, interval: timeframe, limit });
+    // Biquote handles both crypto and forex. 
+    // We just need to format the symbol correctly (e.g., XAUUSD, BTCUSDT)
+    const cleanSymbol = symbol.replace('/', ''); 
+    const candles = await bq.ohlcv({ symbol: cleanSymbol, interval: timeframe, limit });
+    
     return candles.map(c => ({
       time: c[0] || c.time, 
       open: parseFloat(c[1] || c.open), 
