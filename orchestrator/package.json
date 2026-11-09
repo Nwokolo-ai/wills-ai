@@ -1,0 +1,9 @@
+{
+  "name": "orchestrator",
+  "type": "module",
+  "dependencies": {
+    "express": "^4.19.0",
+    "http-proxy-middleware": "^3.0.0",
+    "ws": "^8.18.0"
+  }
+}
