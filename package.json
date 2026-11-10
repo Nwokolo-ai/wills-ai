@@ -1,15 +1,12 @@
 {
   "name": "wills-ai",
   "version": "1.0.0",
-  "description": "Will's AI — Live economic calendar, news, and event alerts",
   "main": "server.js",
   "scripts": {
-    "postinstall": "cd orchestrator && npm install",
-    "start": "node server.js & node orchestrator/server.js",
+    "start": "node server.js",
     "scrape": "node ffScraper.js",
     "news": "node newsScraper.js"
   },
-  "engines": { "node": ">=20.0.0" },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "biquote": "^0.3.0",
@@ -21,7 +18,5 @@
     "nodemailer": "^6.9.0",
     "rss-parser": "^3.13.0",
     "web-push": "^3.6.7"
-  },
-  "author": "Nwokolo",
-  "license": "ISC"
+  }
 }
