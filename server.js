@@ -31,7 +31,6 @@ try {
     );
     console.log('[push] configured');
   } else {
-    console.warn('[push] VAPID keys missing');
     webpush = null;
   }
 } catch (e) { webpush = null; }
@@ -159,7 +158,7 @@ async function sendPushToAll(payload) {
 global.sendPushToAll = sendPushToAll;
 
 // ═══════════════════════════════════════════════════════════
-//  TELEGRAM WEBHOOK (Restored)
+//  TELEGRAM WEBHOOK
 // ═══════════════════════════════════════════════════════════
 app.post('/api/telegram/webhook', async (req, res) => {
   try {
@@ -170,37 +169,157 @@ app.post('/api/telegram/webhook', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-//  STRATEGIES APIs & CRON ENGINE
+//  STRATEGIES API
 // ═══════════════════════════════════════════════════════════
-// (Keep your existing strategy routes here: /api/strategies, /api/strategies/toggle)
-// ... 
-cron.schedule('* * * * *', async () => {
-  // Strategy engine logic here...
+
+app.get('/api/strategies', async (req, res) => {
+  try {
+    const { is_public, type } = req.query;
+    let query = db.admin.from('strategies').select('*, profiles(username)');
+    
+    if (is_public === 'true') {
+      query = query.eq('is_public', true);
+    } else {
+      const token = (req.headers.authorization || '').replace('Bearer ', '');
+      if (!token) return res.status(401).json({ error: 'Unauthorized' });
+      const { data: { user }, error: authErr } = await db.admin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Invalid session' });
+      query = query.eq('creator_id', user.id);
+    }
+
+    if (type) query = query.eq('strategy_type', type);
+    
+    const { data, error } = await query;
+    if (error) {
+      console.error('[strategies] DB Error:', error);
+      throw error;
+    }
+    res.json({ strategies: data });
+  } catch (err) {
+    console.error('[strategies] API Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
-// ...
+
+app.post('/api/strategies', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: { user }, error: authErr } = await db.admin.auth.getUser(token);
+    if (authErr || !user) return res.status(401).json({ error: 'Invalid session' });
+    
+    const { name, description, is_public, strategy_type, code } = req.body;
+    
+    const { data, error } = await db.admin.from('strategies').insert({
+      creator_id: user.id, name, description, is_public, strategy_type, code, status: 'inactive'
+    }).select().single();
+
+    if (error) throw error;
+    res.json({ strategy: data });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/strategies/:id/toggle', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const { error } = await db.admin.from('strategies').update({ status }).eq('id', id);
+    if (error) throw error;
+    res.json({ success: true, status });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/strategies/:id/stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: trades, error } = await db.admin.from('trades')
+      .select('pnl_pct').eq('strategy_id', id).eq('status', 'CLOSED');
+
+    if (error) throw error;
+    if (!trades || trades.length === 0) return res.json({ winRate: 0, totalPnl: 0, totalTrades: 0 });
+
+    const winningTrades = trades.filter(t => t.pnl_pct > 0).length;
+    const totalPnl = trades.reduce((sum, t) => sum + t.pnl_pct, 0);
+    
+    res.json({
+      winRate: ((winningTrades / trades.length) * 100).toFixed(1),
+      totalPnl: totalPnl.toFixed(2),
+      totalTrades: trades.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ═══════════════════════════════════════════════════════════
-//  CRONS & BOOT (Restored Alerts & Scraper)
+//  STRATEGY CRON ENGINE (Runs every minute)
+// ═══════════════════════════════════════════════════════════
+
+cron.schedule('* * * * *', async () => {
+  try {
+    const { data: strategies } = await db.admin.from('strategies').select('*').eq('status', 'running');
+    if (!strategies || strategies.length === 0) return;
+
+    for (const strat of strategies) {
+      try {
+        const sandbox = {
+          console, process, require,
+          __dirname: path.join(DATA_DIR, 'strategies'),
+          getMarketData: async (symbol, tf, limit) => {
+            const Biquote = require('biquote');
+            const bq = new Biquote.Biquote ? new Biquote.Biquote() : new Biquote();
+            const candles = await bq.ohlcv({ symbol: symbol.replace('/', ''), interval: tf, limit });
+            return candles.map(c => ({ time: c[0], open: +c[1], high: +c[2], low: +c[3], close: +c[4], volume: +c[5] }));
+          },
+          openTrade: async (symbol, direction, entryPrice) => {
+            const { data } = await db.admin.from('trades').insert({
+              strategy_id: strat.id, symbol, direction, entry_price: entryPrice, status: 'OPEN'
+            }).select().single();
+            return data.id;
+          },
+          closeTrade: async (tradeId, exitPrice) => {
+            const { data: trade } = await db.admin.from('trades').select('*').eq('id', tradeId).single();
+            const pnl = trade.direction === 'BUY' 
+              ? ((exitPrice - trade.entry_price) / trade.entry_price) * 100
+              : ((trade.entry_price - exitPrice) / trade.entry_price) * 100;
+            await db.admin.from('trades').update({ exit_price: exitPrice, pnl_pct: pnl, status: 'CLOSED', closed_at: new Date().toISOString() }).eq('id', tradeId);
+          },
+          sendSignal: (action, symbol, price, reason) => {
+            db.admin.from('signals').insert({ strategy_id: strat.id, action, symbol, price, reason }).then();
+            console.log(`[Signal] ${strat.name}: ${action} ${symbol} @ ${price}`);
+          }
+        };
+        const context = vm.createContext(sandbox);
+        const script = new vm.Script(strat.code);
+        await script.runInContext(context);
+      } catch (err) {
+        console.error(`[Engine] Error in ${strat.name}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[Engine] Cron error:', err.message);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  CRONS & BOOT
 // ═══════════════════════════════════════════════════════════
 
 cron.schedule('0 4 * * *', async () => {
   try { const { scrape } = require('./ffScraper'); await scrape(); } catch (e) {}
 });
 
-// This runs your alerts every minute!
 cron.schedule('* * * * *', () => {
   alerts.runAll().catch(e => console.error('[cron] alerts:', e.message));
-});
-
-cron.schedule('0 3 * * *', async () => {
-  try { const { cleanup } = require('./ffScraper'); await cleanup(); } catch {}
-  try { await alerts.cleanupOldLogs(); } catch {}
 });
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Will's AI → http://localhost:${PORT}`);
   
-  // Restore Telegram polling/webhook on boot
   const PUBLIC_URL = process.env.PUBLIC_URL || '';
   if (PUBLIC_URL && tg.hasToken && tg.useWebhook) {
     tg.setWebhook(PUBLIC_URL).catch(() => {});
