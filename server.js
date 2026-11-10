@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const cron = require('node-cron');
-const vm = require('node:vm'); // For running strategy code safely
+const vm = require('node:vm'); // For running strategies safely
 
 const auth = require('./auth');
 const db = require('./db');
@@ -21,6 +21,9 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(PUBLIC_DIR));
 
+// Ensure data folder exists for strategies
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
 function formatDateLabel(iso) {
   const d = new Date(iso + 'T00:00:00Z');
   return d.toLocaleDateString('en-US', {
@@ -28,7 +31,18 @@ function formatDateLabel(iso) {
   });
 }
 
-// ── API: CALENDAR ──
+// ═══════════════════════════════════════════════════════════
+//  CORE APIs
+// ═══════════════════════════════════════════════════════════
+
+app.get('/api/config', (req, res) => {
+  res.json({
+    supabaseUrl: db.SUPABASE_URL,
+    supabasePublishableKey: db.PUBLISHABLE,
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || null,
+  });
+});
+
 app.get('/api/calendar', async (req, res) => {
   try {
     const now = new Date();
@@ -62,16 +76,42 @@ app.get('/api/calendar', async (req, res) => {
   }
 });
 
-// ── API: NEWS ──
-app.get('/api/news', (req, res) => {
+// ── Biquote News API with Caching ──
+let newsCache = { data: [], timestamp: 0 };
+const NEWS_CACHE_MS = 15 * 60 * 1000; // 15 minutes
+
+app.get('/api/news', async (req, res) => {
   try {
-    res.type('json').send(fs.readFileSync(path.join(DATA_DIR, 'investing_news.json'), 'utf8'));
+    const now = Date.now();
+    if (newsCache.data.length > 0 && (now - newsCache.timestamp) < NEWS_CACHE_MS) {
+      return res.json({ items: newsCache.data });
+    }
+
+    const response = await fetch(`https://biquote.io/api/news/market?maxResults=30`);
+    const data = await response.json();
+
+    if (!Array.isArray(data)) return res.json({ items: [] });
+
+    const formattedNews = data.map(item => ({
+      title: item.title || 'Market Update',
+      link: item.url || '#',
+      pubDate: item.publishedDate || new Date().toISOString(),
+      snippet: item.description || '',
+      category: 'forex' 
+    }));
+
+    newsCache = { data: formattedNews, timestamp: now };
+    res.json({ items: formattedNews });
   } catch (err) {
-    res.status(500).json({ error: err.message, items: [] });
+    console.error('[news] Biquote API error:', err.message);
+    res.json({ items: newsCache.data || [] });
   }
 });
 
-// ── API: AUTH ──
+// ═══════════════════════════════════════════════════════════
+//  AUTH APIs
+// ═══════════════════════════════════════════════════════════
+
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { username, pin, email } = req.body || {};
@@ -94,7 +134,10 @@ app.get('/api/auth/me', async (req, res) => {
   } catch (err) { res.status(401).json({ error: err.message }); }
 });
 
-// ── API: STRATEGIES ──
+// ═══════════════════════════════════════════════════════════
+//  STRATEGY MARKETPLACE APIs
+// ═══════════════════════════════════════════════════════════
+
 app.get('/api/strategies', async (req, res) => {
   try {
     const { is_public, type } = req.query;
@@ -124,6 +167,7 @@ app.post('/api/strategies', async (req, res) => {
     const token = (req.headers.authorization || '').replace('Bearer ', '');
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
     const { data: { user } } = await db.admin.auth.getUser(token);
+    
     const { name, description, is_public, strategy_type, code } = req.body;
     
     const { data, error } = await db.admin.from('strategies').insert({
@@ -149,7 +193,10 @@ app.post('/api/strategies/:id/toggle', async (req, res) => {
   }
 });
 
-// ── THE ENGINE: RUNS EVERY MINUTE ──
+// ═══════════════════════════════════════════════════════════
+//  THE CRON ENGINE (Runs every minute)
+// ═══════════════════════════════════════════════════════════
+
 cron.schedule('* * * * *', async () => {
   try {
     const { data: strategies } = await db.admin.from('strategies').select('*').eq('status', 'running');
@@ -194,7 +241,27 @@ cron.schedule('* * * * *', async () => {
   }
 });
 
-// ── BOOT ──
+// ═══════════════════════════════════════════════════════════
+//  CRON & BOOT
+// ═══════════════════════════════════════════════════════════
+
+cron.schedule('0 4 * * *', async () => {
+  try { const { scrape } = require('./ffScraper'); await scrape(); } catch (e) {}
+});
+
+cron.schedule('* * * * *', () => {
+  alerts.runAll().catch(e => console.error('[cron] alerts:', e.message));
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Will's AI → http://localhost:${PORT}`);
+  
+  // Run initial calendar scrape on boot
+  setTimeout(async () => {
+    try { 
+      const { scrape } = require('./ffScraper'); 
+      await scrape(); 
+      console.log('[boot] calendar scraped'); 
+    } catch (e) { console.error('[boot] calendar error:', e.message); }
+  }, 5000);
 });
