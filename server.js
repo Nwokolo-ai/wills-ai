@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const cron = require('node-cron');
-const vm = require('node:vm'); // Native Node VM to run code safely
+const vm = require('node:vm'); // For running strategy code safely
 
 const auth = require('./auth');
 const db = require('./db');
@@ -21,12 +21,80 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(PUBLIC_DIR));
 
-// ... [Keep all your existing API routes for /api/calendar, /api/news, /api/auth, etc.] ...
+function formatDateLabel(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
+  });
+}
 
-// ═══════════════════════════════════════════════════════════
-//  STRATEGY MARKETPLACE API (Simplified)
-// ═══════════════════════════════════════════════════════════
+// ── API: CALENDAR ──
+app.get('/api/calendar', async (req, res) => {
+  try {
+    const now = new Date();
+    const from = new Date(now); from.setDate(from.getDate() - 1);
+    const to = new Date(now); to.setDate(to.getDate() + 14);
 
+    const { data, error } = await db.admin.from('calendar_events')
+      .select('*')
+      .gte('event_date', from.toISOString().slice(0, 10))
+      .lte('event_date', to.toISOString().slice(0, 10))
+      .order('event_timestamp', { ascending: true, nullsFirst: false });
+
+    if (error) throw error;
+
+    const events = (data || []).map(e => ({
+      date: formatDateLabel(e.event_date),
+      time: e.event_time || '—',
+      timestamp: e.event_timestamp,
+      currency: e.currency,
+      impact: e.impact,
+      event: e.title,
+      actual: e.actual,
+      forecast: e.forecast,
+      previous: e.previous,
+      beatMiss: e.beat_miss,
+    }));
+
+    res.json({ count: events.length, events });
+  } catch (err) {
+    res.status(500).json({ error: err.message, events: [] });
+  }
+});
+
+// ── API: NEWS ──
+app.get('/api/news', (req, res) => {
+  try {
+    res.type('json').send(fs.readFileSync(path.join(DATA_DIR, 'investing_news.json'), 'utf8'));
+  } catch (err) {
+    res.status(500).json({ error: err.message, items: [] });
+  }
+});
+
+// ── API: AUTH ──
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { username, pin, email } = req.body || {};
+    res.json(await auth.signup({ username, pin, email }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, pin } = req.body || {};
+    res.json({ session: await auth.login({ username, pin }) });
+  } catch (err) { res.status(401).json({ error: err.message }); }
+});
+
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'No token' });
+    res.json({ profile: await auth.getProfile(token) });
+  } catch (err) { res.status(401).json({ error: err.message }); }
+});
+
+// ── API: STRATEGIES ──
 app.get('/api/strategies', async (req, res) => {
   try {
     const { is_public, type } = req.query;
@@ -43,10 +111,8 @@ app.get('/api/strategies', async (req, res) => {
     }
 
     if (type) query = query.eq('strategy_type', type);
-
     const { data, error } = await query;
     if (error) throw error;
-    
     res.json({ strategies: data });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -57,15 +123,11 @@ app.post('/api/strategies', async (req, res) => {
   try {
     const token = (req.headers.authorization || '').replace('Bearer ', '');
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
-    
-    const { data: { user }, error: authErr } = await db.admin.auth.getUser(token);
-    if (authErr || !user) throw new Error('Invalid session');
-
+    const { data: { user } } = await db.admin.auth.getUser(token);
     const { name, description, is_public, strategy_type, code } = req.body;
     
     const { data, error } = await db.admin.from('strategies').insert({
-      creator_id: user.id,
-      name, description, is_public, strategy_type, code, status: 'inactive'
+      creator_id: user.id, name, description, is_public, strategy_type, code, status: 'inactive'
     }).select().single();
 
     if (error) throw error;
@@ -75,86 +137,56 @@ app.post('/api/strategies', async (req, res) => {
   }
 });
 
-// Start or Stop a strategy (Just updates the database!)
 app.post('/api/strategies/:id/toggle', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body; // 'running' or 'inactive'
-
+    const { status } = req.body;
     const { error } = await db.admin.from('strategies').update({ status }).eq('id', id);
     if (error) throw error;
-    
     res.json({ success: true, status });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-//  THE NEW ENGINE: RUNS EVERY MINUTE
-// ═══════════════════════════════════════════════════════════
-
-// We keep track of active trades in memory so we don't open 100 trades
-const activeTrades = new Map(); 
-
+// ── THE ENGINE: RUNS EVERY MINUTE ──
 cron.schedule('* * * * *', async () => {
-  console.log('[Engine] Checking for running strategies...');
-  
   try {
     const { data: strategies } = await db.admin.from('strategies').select('*').eq('status', 'running');
     if (!strategies || strategies.length === 0) return;
 
     for (const strat of strategies) {
       try {
-        // 1. Create a safe sandbox for the strategy code
         const sandbox = {
           console,
-          process, // Gives access to process.env
+          process,
           require,
           __dirname: path.join(DATA_DIR, 'strategies'),
           
-          // Inject the SDK functions directly
           getMarketData: async (symbol, tf, limit) => {
             const Biquote = require('biquote');
             const bq = new Biquote.Biquote ? new Biquote.Biquote() : new Biquote();
             const candles = await bq.ohlcv({ symbol: symbol.replace('/', ''), interval: tf, limit });
             return candles.map(c => ({ time: c[0], open: +c[1], high: +c[2], low: +c[3], close: +c[4], volume: +c[5] }));
           },
-          
           openTrade: async (symbol, direction, entryPrice) => {
             const { data } = await db.admin.from('trades').insert({
               strategy_id: strat.id, symbol, direction, entry_price: entryPrice, status: 'OPEN'
             }).select().single();
-            activeTrades.set(strat.id, data.id);
             return data.id;
           },
-          
-          closeTrade: async (tradeId, exitPrice) => {
-            const { data: trade } = await db.admin.from('trades').select('*').eq('id', tradeId).single();
-            const pnl = trade.direction === 'BUY' 
-              ? ((exitPrice - trade.entry_price) / trade.entry_price) * 100
-              : ((trade.entry_price - exitPrice) / trade.entry_price) * 100;
-            
-            await db.admin.from('trades').update({ exit_price: exitPrice, pnl_pct: pnl, status: 'CLOSED', closed_at: new Date().toISOString() }).eq('id', tradeId);
-            activeTrades.delete(strat.id);
-          },
-          
           sendSignal: (action, symbol, price, reason) => {
-            db.admin.from('signals').insert({
-              strategy_id: strat.id, action, symbol, price, reason
-            }).then();
+            db.admin.from('signals').insert({ strategy_id: strat.id, action, symbol, price, reason }).then();
             console.log(`[Signal] ${strat.name}: ${action} ${symbol} @ ${price}`);
           }
         };
 
-        // 2. Run the code
         const context = vm.createContext(sandbox);
-        // The user code should call run()
         const script = new vm.Script(strat.code);
         await script.runInContext(context);
 
       } catch (err) {
-        console.error(`[Engine] Error running strategy ${strat.name}:`, err.message);
+        console.error(`[Engine] Error in ${strat.name}:`, err.message);
       }
     }
   } catch (err) {
@@ -162,8 +194,7 @@ cron.schedule('* * * * *', async () => {
   }
 });
 
-// ... [Keep your app.listen, Telegram webhooks, and push notifications at the bottom] ...
-
+// ── BOOT ──
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Will's AI → http://localhost:${PORT}`);
 });
