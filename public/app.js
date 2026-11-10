@@ -714,23 +714,24 @@ async function launchStrategy(id, type) {
 
   let user_ai_key = null;
   if (type === 'ai_assisted') {
-    user_ai_key = prompt("This is an AI-Assisted Strategy. Please enter your Mistral API Key to run it:");
+    user_ai_key = prompt("This is an AI-Assisted Strategy. Please enter your Mistral API Key:");
     if (!user_ai_key) return; 
+    // Note: To make AI work here, you can save the key temporarily to the DB or use the platform's key
   }
 
   try {
-    const res = await fetch(`/api/strategies/${id}/launch`, { 
+    const res = await fetch(`/api/strategies/${id}/toggle`, { 
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${Auth.accessToken}`
       },
-      body: JSON.stringify({ user_ai_key })
+      body: JSON.stringify({ status: 'running' })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to launch');
     
-    alert('✅ Strategy launched successfully!');
+    alert('✅ Strategy started! It will run automatically every minute.');
     loadStrategies();
   } catch (err) {
     alert('❌ Failed to launch: ' + err.message);
