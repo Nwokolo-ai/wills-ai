@@ -112,7 +112,7 @@ app.post('/api/signal', async (req, res) => {
     const mistralKey = process.env.MISTRAL_API_KEY;
 
     if (!mistralKey) {
-      return res.status(500).json({ error: 'Mistral API key missing on server. Please add MISTRAL_API_KEY to .env.local' });
+      return res.status(500).json({ error: 'Mistral API key missing on server. Please add MISTRAL_API_KEY to environment variables.' });
     }
     if (!timeframe) {
       return res.status(400).json({ error: 'Timeframe is required' });
@@ -129,7 +129,7 @@ app.post('/api/signal', async (req, res) => {
       else if (lower.includes('silver') || lower.includes('xag')) targetSymbol = 'XAGUSD';
     }
 
-    // If it's just general chat (no trading symbol found)
+    // 2. If it's just general chat (no trading symbol found), chat with Mistral directly
     if (!targetSymbol && text) {
       const chatRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
@@ -137,7 +137,7 @@ app.post('/api/signal', async (req, res) => {
         body: JSON.stringify({
           model: 'open-mistral-7b',
           messages: [{ role: 'user', content: text }],
-          temperature: 0.7, max_tokens: 200
+          temperature: 0.7, max_tokens: 250
         })
       });
       const chatData = await chatRes.json();
@@ -145,7 +145,12 @@ app.post('/api/signal', async (req, res) => {
       return res.json({ signal: chatData.choices[0].message.content });
     }
 
-    // 2. Fetch data from Biquote
+    // If no text and no symbol, stop.
+    if (!targetSymbol) {
+      return res.json({ signal: "Please select a symbol (like Gold or EUR/USD) or ask a question." });
+    }
+
+    // 3. Fetch data from Biquote for the specific symbol
     const bq = new Biquote();
     const ohlcData = await bq.ohlc(targetSymbol, { interval: timeframe, limit: 150 }).catch(() => null);
     
@@ -162,7 +167,7 @@ app.post('/api/signal', async (req, res) => {
     const n = prices.length;
     const cp = prices[n-1];
 
-    // 3. Build Prompt (Hiding Strategies)
+    // 4. Build Prompt (Hiding Strategies)
     const prompt = `
       You are a professional quantitative trader. Analyze this market data for ${targetSymbol} on the ${timeframe} timeframe.
       
@@ -177,7 +182,7 @@ app.post('/api/signal', async (req, res) => {
       Instead, describe the market conditions using plain English (e.g., "The market is strongly trending", "Momentum is shifting", "Price is overbought").
     `;
 
-    // 4. Call Mistral
+    // 5. Call Mistral
     const mistralRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
       headers: { 
