@@ -14,10 +14,8 @@
 </head>
 <body data-theme="dark">
 
-<!-- Hidden Audio for Alerts -->
 <audio id="alertSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
 
-<!-- PWA Install Banner -->
 <div class="pwa-banner" id="pwaBanner">
   <div class="pwa-inner">
     <div class="pwa-icon">◆</div>
@@ -50,11 +48,8 @@
 </div>
 
 <div class="panel active" id="panel-calendar">
-
-  <div class="ad-slot ad-slot-top" id="adTop">
-    <span>Ad space · available</span>
-  </div>
-
+  <div class="ad-slot ad-slot-top" id="adTop"><span>Ad space · available</span></div>
+  
   <div class="day-filter" style="padding-bottom: 0;">
     <button class="day-btn active" data-day="today">Today</button>
     <button class="day-btn" data-day="tomorrow">Tomorrow</button>
@@ -89,17 +84,8 @@
 
   <div class="table-wrap">
     <table>
-      <thead>
-        <tr>
-          <th class="col-time">Time</th>
-          <th class="col-ccy">CCY</th>
-          <th class="col-imp"></th>
-          <th class="col-event">Event</th>
-        </tr>
-      </thead>
-      <tbody id="tbody">
-        <tr><td colspan="4" class="empty">Loading…</td></tr>
-      </tbody>
+      <thead><tr><th class="col-time">Time</th><th class="col-ccy">CCY</th><th class="col-imp"></th><th class="col-event">Event</th></tr></thead>
+      <tbody id="tbody"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -115,9 +101,7 @@
     <button class="day-btn" data-cat="markets">Markets</button>
     <input type="text" id="newsSearch" placeholder="Search news…" />
   </div>
-  <div class="news-grid" id="newsGrid">
-    <div class="empty">Loading news…</div>
-  </div>
+  <div class="news-grid" id="newsGrid"><div class="empty">Loading news…</div></div>
 </div>
 
 <div class="auth-overlay" id="authOverlay"></div>
@@ -129,12 +113,8 @@
     <h2>Welcome back</h2>
     <p class="auth-sub">Log in to receive event and news alerts.</p>
     <form id="formLogin" class="auth-form">
-      <label>Username
-        <input type="text" id="loginUsername" placeholder="Your username" autocomplete="username" required />
-      </label>
-      <label>PIN
-        <input type="password" id="loginPin" placeholder="Your PIN" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" autocomplete="current-password" required />
-      </label>
+      <label>Username<input type="text" id="loginUsername" required /></label>
+      <label>PIN<input type="password" id="loginPin" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" required /></label>
       <div class="auth-error" id="loginError"></div>
       <button type="submit" class="auth-submit" id="loginSubmit">Log in</button>
       <div class="auth-links" style="justify-content: space-between;">
@@ -144,20 +124,26 @@
     </form>
   </div>
 
-  <!-- NEW: Forgot Password View -->
   <div class="auth-view" id="viewForgot">
     <h2>Reset your PIN</h2>
-    <p class="auth-sub">Enter your username and we'll send a reset link to the email on file.</p>
+    <p class="auth-sub">Enter your username and we'll send a reset link to your email.</p>
     <form id="formForgot" class="auth-form">
-      <label>Username <span class="req">required</span>
-        <input type="text" id="forgotUsername" placeholder="Your username" autocomplete="username" required />
-      </label>
+      <label>Username<input type="text" id="forgotUsername" required /></label>
       <div class="auth-error" id="forgotError"></div>
       <div class="auth-error" id="forgotSuccess" style="color: var(--accent); background: rgba(0,245,160,.1); border-left-color: var(--accent);"></div>
       <button type="submit" class="auth-submit" id="forgotSubmit">Send Reset Link</button>
-      <div class="auth-links">
-        <button type="button" class="auth-link" id="backToLogin">← Back to login</button>
-      </div>
+      <div class="auth-links"><button type="button" class="auth-link" id="backToLogin">← Back to login</button></div>
+    </form>
+  </div>
+
+  <!-- NEW: The Reset Form that opens when they click the email link -->
+  <div class="auth-view" id="viewReset">
+    <h2>Set new PIN</h2>
+    <p class="auth-sub">Enter your new 6-12 digit PIN below.</p>
+    <form id="formReset" class="auth-form">
+      <label>New PIN<input type="password" id="resetPin" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" required /></label>
+      <div class="auth-error" id="resetError"></div>
+      <button type="submit" class="auth-submit" id="resetSubmit">Save New PIN</button>
     </form>
   </div>
 
@@ -165,23 +151,12 @@
     <h2>Create your account</h2>
     <p class="auth-sub">Quick signup — takes 15 seconds.</p>
     <form id="formSignup" class="auth-form">
-      <label>Username <span class="req">required</span>
-        <input type="text" id="signupUsername" placeholder="e.g. willtrader" autocomplete="username" required minlength="3" maxlength="20" />
-        <small>3–20 characters. Letters, numbers, _ and - only.</small>
-      </label>
-      <label>PIN <span class="req">required</span>
-        <input type="password" id="signupPin" placeholder="At least 6 digits" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" autocomplete="new-password" required />
-        <small>Digits only. Avoid patterns like 123456.</small>
-      </label>
-      <label>Email <span class="req">required for alerts & reset</span>
-        <input type="email" id="signupEmail" placeholder="you@example.com" autocomplete="email" required />
-      </label>
+      <label>Username<input type="text" id="signupUsername" required minlength="3" maxlength="20" /></label>
+      <label>PIN<input type="password" id="signupPin" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" required /></label>
+      <label>Email<input type="email" id="signupEmail" required /></label>
       <div class="auth-error" id="signupError"></div>
       <button type="submit" class="auth-submit" id="signupSubmit">Create account</button>
-      <div class="auth-links">
-        <span>Already have an account?</span>
-        <button type="button" class="auth-link" id="toLogin">Log in →</button>
-      </div>
+      <div class="auth-links"><span>Already have an account?</span><button type="button" class="auth-link" id="toLogin">Log in →</button></div>
     </form>
   </div>
 </aside>
@@ -190,9 +165,7 @@
   <button class="auth-close" id="prefClose" aria-label="Close">✕</button>
   <h2 style="margin-bottom:6px;">Alert preferences</h2>
   <p class="auth-sub">Choose what you want to be notified about.</p>
-  <div id="prefContent">
-    <div class="pref-loading">Loading…</div>
-  </div>
+  <div id="prefContent"><div class="pref-loading">Loading…</div></div>
 </aside>
 
 <div class="modal-overlay" id="eventModal">
