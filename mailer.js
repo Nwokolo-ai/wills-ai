@@ -14,9 +14,6 @@ if (SMTP_USER && SMTP_PASS) {
     host: SMTP_HOST, port: SMTP_PORT, secure: true,
     auth: { user: SMTP_USER, pass: SMTP_PASS.replace(/\s+/g, '') },
   });
-  console.log('[mailer] ready');
-} else {
-  console.warn('[mailer] SMTP not configured');
 }
 
 function baseTemplate(title, bodyHtml) {
@@ -49,9 +46,7 @@ function welcomeEmail(profile, upcomingEvents) {
   const eventsHtml = (upcomingEvents || []).slice(0, 3).map(e => {
     const impact = (e.impact || 'low').toLowerCase();
     const label = impact === 'high' ? 'HIGH' : 'MEDIUM';
-    const time = new Date(e.event_timestamp).toLocaleString('en-GB', {
-      timeZone: 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-    });
+    const time = new Date(e.event_timestamp).toLocaleString('en-GB', { timeZone: 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     return `<div class="event ${impact}"><div class="label">${label} · ${e.currency}</div><div class="name">${e.title}</div><div class="time">${time} UTC</div></div>`;
   }).join('') || '<p>No upcoming events right now.</p>';
 
@@ -77,9 +72,7 @@ function eventAlertEmail(profile, event, minutesUntil) {
   const impact = (event.impact || 'low').toLowerCase();
   const label = impact === 'high' ? 'HIGH IMPACT' : 'MEDIUM IMPACT';
   const emoji = impact === 'high' ? '⚠️' : '🔔';
-  const time = new Date(event.timestamp || event.event_timestamp).toLocaleString('en-GB', {
-    timeZone: 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-  });
+  const time = new Date(event.timestamp || event.event_timestamp).toLocaleString('en-GB', { timeZone: 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   const body = `
     <div class="card">
       <h1>${emoji} ${label} in ${minutesUntil} min</h1>
@@ -101,20 +94,6 @@ function newsAlertEmail(profile, items) {
   return { subject: `📰 ${items.length} new: ${items[0].title.slice(0,50)}`, html: baseTemplate('News', body) };
 }
 
-async function sendEmail({ to, subject, html }) {
-  if (!transporter) { console.log(`[mailer] SKIP: ${subject} → ${to}`); return { skipped: true }; }
-  try {
-    const info = await transporter.sendMail({ from: FROM_ADDRESS, to, subject, html });
-    console.log(`[mailer] sent → ${to}`);
-    return { ok: true, id: info.messageId };
-  } catch (err) {
-    console.error(`[mailer] FAILED → ${to}:`, err.message);
-    return { ok: false, error: err.message };
-  }
-}
-
-// ... [Keep your existing imports and baseTemplate] ...
-
 function resetPinEmail(username, link) {
   const body = `
     <div class="card">
@@ -128,5 +107,12 @@ function resetPinEmail(username, link) {
   return { subject: 'Reset your Will\'s AI PIN', html: baseTemplate('Reset PIN', body) };
 }
 
-// Add it to exports:
+async function sendEmail({ to, subject, html }) {
+  if (!transporter) { console.log(`[mailer] SKIP: ${subject} → ${to}`); return { skipped: true }; }
+  try {
+    const info = await transporter.sendMail({ from: FROM_ADDRESS, to, subject, html });
+    return { ok: true, id: info.messageId };
+  } catch (err) { return { ok: false, error: err.message }; }
+}
+
 module.exports = { sendEmail, welcomeEmail, eventAlertEmail, newsAlertEmail, resetPinEmail };
