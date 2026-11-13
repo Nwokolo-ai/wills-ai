@@ -8,26 +8,31 @@
 <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="/styles.css" />
 <style>
-  #authPanel, #prefPanel, #authOverlay, #eventModal { display: none !important; }
-  #authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open { display: flex !important; }
+  /* DeepSeek / Signal UI Styles */
+  .signal-container { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 70vh; padding: 20px; text-align: center; }
+  .orb-wrapper { position: relative; width: 180px; height: 180px; margin-bottom: 20px; }
+  .orb-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--accent); animation: pulse-ring 2s infinite ease-out; }
+  .orb-ring:nth-child(2) { animation-delay: 0.5s; }
+  .orb-ring:nth-child(3) { animation-delay: 1s; }
+  .orb-svg { position: absolute; inset: 15px; border-radius: 50%; background: var(--bg2); display: flex; align-items: center; justify-content: center; z-index: 2; box-shadow: 0 0 30px rgba(0, 245, 160, 0.3); }
+  .orb-svg svg { width: 80px; height: 80px; }
+  @keyframes pulse-ring {
+    0% { transform: scale(0.8); opacity: 1; }
+    100% { transform: scale(1.4); opacity: 0; }
+  }
+  .signal-title { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, var(--accent), #00d4ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 5px; }
+  .signal-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 30px; }
+  .signal-controls { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 12px; }
+  .signal-controls select { padding: 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 14px; font-family: inherit; }
+  .signal-btn { padding: 14px; background: linear-gradient(135deg, var(--accent), #00d4ff); color: var(--bg); border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+  .signal-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .signal-result { margin-top: 20px; padding: 20px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; text-align: left; max-width: 500px; width: 100%; white-space: pre-wrap; display: none; line-height: 1.5; font-size: 14px;}
+  .signal-result.show { display: block; }
 </style>
 </head>
 <body data-theme="dark">
 
-<audio id="alertSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
-
-<div class="pwa-banner" id="pwaBanner">
-  <div class="pwa-inner">
-    <div class="pwa-icon">◆</div>
-    <div class="pwa-text">
-      <strong>Install Will's AI</strong>
-      <span>Faster access, offline support</span>
-    </div>
-    <button class="pwa-install" id="pwaInstall">Install</button>
-    <button class="pwa-dismiss" id="pwaDismiss">✕</button>
-  </div>
-</div>
-
+<!-- ... [Keep your existing PWA Banner and Top Bar] ... -->
 <div class="top">
   <div class="brand">Will's AI</div>
   <div class="header-right">
@@ -44,136 +49,51 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="calendar">📅 Calendar</button>
   <button class="tab-btn" data-tab="news">📰 News</button>
+  <button class="tab-btn" data-tab="signal">🧠 Signal AI</button>
   <span class="last-updated" id="lastUpdated">—</span>
 </div>
 
-<div class="panel active" id="panel-calendar">
-  <div class="ad-slot ad-slot-top" id="adTop"><span>Ad space · available</span></div>
-  
-  <div class="day-filter" style="padding-bottom: 0;">
-    <button class="day-btn active" data-day="today">Today</button>
-    <button class="day-btn" data-day="tomorrow">Tomorrow</button>
-    <button class="day-btn" data-day="week">This Week</button>
-    <button class="day-btn" data-day="all">All</button>
-    <button class="day-btn" id="watchlistBtn">⭐ Watchlist</button>
-    <button class="day-btn tz-btn" id="tzToggle">🌍 Loading…</button>
-  </div>
+<!-- ... [Keep your existing Calendar and News panels] ... -->
 
-  <div style="padding: 8px 16px; background: var(--bg); position: sticky; top: 140px; z-index: 90;">
-    <input type="text" id="calendarSearch" placeholder="Search events (e.g. CPI, NFP)..." style="width: 100%; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px;" />
-  </div>
-
-  <div class="currency-filter" id="currencyFilter" style="top: 190px;">
-    <button class="cur-btn active" data-cur="all">All</button>
-    <button class="cur-btn" data-cur="USD">🇺🇸 USD</button>
-    <button class="cur-btn" data-cur="EUR">🇪🇺 EUR</button>
-    <button class="cur-btn" data-cur="GBP">🇬🇧 GBP</button>
-    <button class="cur-btn" data-cur="JPY">🇯🇵 JPY</button>
-    <button class="cur-btn" data-cur="AUD">🇦🇺 AUD</button>
-    <button class="cur-btn" data-cur="NZD">🇳🇿 NZD</button>
-    <button class="cur-btn" data-cur="CAD">🇨🇦 CAD</button>
-    <button class="cur-btn" data-cur="CHF">🇨🇭 CHF</button>
-    <button class="cur-btn" data-cur="CNY">🇨🇳 CNY</button>
-  </div>
-
-  <div class="stats" style="top: 240px;">
-    <div class="stat"><div class="lbl">Total</div><div class="val" id="statTotal">—</div></div>
-    <div class="stat"><div class="lbl">High</div><div class="val high" id="statHigh">—</div></div>
-    <div class="stat"><div class="lbl">Medium</div><div class="val medium" id="statMedium">—</div></div>
-  </div>
-
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th class="col-time">Time</th><th class="col-ccy">CCY</th><th class="col-imp"></th><th class="col-event">Event</th></tr></thead>
-      <tbody id="tbody"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<div class="panel" id="panel-news">
-  <div class="news-controls">
-    <button class="day-btn active" data-cat="all">All</button>
-    <button class="day-btn" data-cat="forex">Forex</button>
-    <button class="day-btn" data-cat="crypto">Crypto</button>
-    <button class="day-btn" data-cat="commodities">Commodities</button>
-    <button class="day-btn" data-cat="economy">Economy</button>
-    <button class="day-btn" data-cat="stocks">Stocks</button>
-    <button class="day-btn" data-cat="markets">Markets</button>
-    <input type="text" id="newsSearch" placeholder="Search news…" />
-  </div>
-  <div class="news-grid" id="newsGrid"><div class="empty">Loading news…</div></div>
-</div>
-
-<div class="auth-overlay" id="authOverlay"></div>
-
-<aside class="auth-panel" id="authPanel">
-  <button class="auth-close" id="authClose" aria-label="Close">✕</button>
-
-  <div class="auth-view active" id="viewLogin">
-    <h2>Welcome back</h2>
-    <p class="auth-sub">Log in to receive event and news alerts.</p>
-    <form id="formLogin" class="auth-form">
-      <label>Username<input type="text" id="loginUsername" required /></label>
-      <label>PIN<input type="password" id="loginPin" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" required /></label>
-      <div class="auth-error" id="loginError"></div>
-      <button type="submit" class="auth-submit" id="loginSubmit">Log in</button>
-      <div class="auth-links" style="justify-content: space-between;">
-        <button type="button" class="auth-link" id="toForgot">Forgot PIN?</button>
-        <button type="button" class="auth-link" id="toSignup">Create an account →</button>
+<!-- NEW: Signal Generator Panel -->
+<div class="panel" id="panel-signal">
+  <div class="signal-container">
+    <div class="orb-wrapper">
+      <div class="orb-ring"></div>
+      <div class="orb-ring"></div>
+      <div class="orb-ring"></div>
+      <div class="orb-svg">
+        <!-- Your SVG Logo -->
+        <svg viewBox="0 0 192 192"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00f5a0"/><stop offset="100%" stop-color="#00d4ff"/></linearGradient></defs><text x="96" y="130" font-family="sans-serif" font-size="120" font-weight="800" fill="url(#g)" text-anchor="middle">W</text></svg>
       </div>
-    </form>
-  </div>
+    </div>
+    
+    <h2 class="signal-title">Will's AI Signal</h2>
+    <p class="signal-sub">Making sure AI works for your family</p>
 
-  <div class="auth-view" id="viewForgot">
-    <h2>Reset your PIN</h2>
-    <p class="auth-sub">Enter your username and we'll send a reset link to your email.</p>
-    <form id="formForgot" class="auth-form">
-      <label>Username<input type="text" id="forgotUsername" required /></label>
-      <div class="auth-error" id="forgotError"></div>
-      <div class="auth-error" id="forgotSuccess" style="color: var(--accent); background: rgba(0,245,160,.1); border-left-color: var(--accent);"></div>
-      <button type="submit" class="auth-submit" id="forgotSubmit">Send Reset Link</button>
-      <div class="auth-links"><button type="button" class="auth-link" id="backToLogin">← Back to login</button></div>
-    </form>
-  </div>
-
-  <!-- NEW: The Reset Form that opens when they click the email link -->
-  <div class="auth-view" id="viewReset">
-    <h2>Set new PIN</h2>
-    <p class="auth-sub">Enter your new 6-12 digit PIN below.</p>
-    <form id="formReset" class="auth-form">
-      <label>New PIN<input type="password" id="resetPin" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" required /></label>
-      <div class="auth-error" id="resetError"></div>
-      <button type="submit" class="auth-submit" id="resetSubmit">Save New PIN</button>
-    </form>
-  </div>
-
-  <div class="auth-view" id="viewSignup">
-    <h2>Create your account</h2>
-    <p class="auth-sub">Quick signup — takes 15 seconds.</p>
-    <form id="formSignup" class="auth-form">
-      <label>Username<input type="text" id="signupUsername" required minlength="3" maxlength="20" /></label>
-      <label>PIN<input type="password" id="signupPin" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" required /></label>
-      <label>Email<input type="email" id="signupEmail" required /></label>
-      <div class="auth-error" id="signupError"></div>
-      <button type="submit" class="auth-submit" id="signupSubmit">Create account</button>
-      <div class="auth-links"><span>Already have an account?</span><button type="button" class="auth-link" id="toLogin">Log in →</button></div>
-    </form>
-  </div>
-</aside>
-
-<aside class="pref-panel" id="prefPanel">
-  <button class="auth-close" id="prefClose" aria-label="Close">✕</button>
-  <h2 style="margin-bottom:6px;">Alert preferences</h2>
-  <p class="auth-sub">Choose what you want to be notified about.</p>
-  <div id="prefContent"><div class="pref-loading">Loading…</div></div>
-</aside>
-
-<div class="modal-overlay" id="eventModal">
-  <div class="modal-box" id="eventModalBox">
-    <button class="modal-close" id="eventModalClose" aria-label="Close">✕</button>
-    <div id="eventModalContent"></div>
+    <div class="signal-controls">
+      <select id="signalSymbol">
+        <option value="XAUUSD">Gold (XAU/USD)</option>
+        <option value="EURUSD">EUR/USD</option>
+        <option value="GBPUSD">GBP/USD</option>
+        <option value="BTCUSD">Bitcoin</option>
+      </select>
+      <select id="signalTF">
+        <option value="1m">1 Minute</option>
+        <option value="5m">5 Minutes</option>
+        <option value="15m">15 Minutes</option>
+        <option value="1h" selected>1 Hour</option>
+        <option value="4h">4 Hours</option>
+        <option value="1d">1 Day</option>
+      </select>
+      <button class="signal-btn" id="generateSignalBtn">Generate Signal</button>
+    </div>
+    
+    <div class="signal-result" id="signalResult"></div>
   </div>
 </div>
+
+<!-- ... [Keep your Auth and Pref panels] ... -->
 
 <script src="/auth-client.js"></script>
 <script src="/app.js"></script>
