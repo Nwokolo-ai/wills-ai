@@ -874,3 +874,107 @@ if (signalBtn) {
     }
   });
 }
+// ── SIGNAL GENERATOR LOGIC ──
+const signalInput = $('signalInput');
+const signalSendBtn = $('signalSendBtn');
+const signalChatMessages = $('signalChatMessages');
+const signalTyping = $('signalTyping');
+const orbArea = $('orbArea');
+
+// Handle sending a message
+async function handleSignalRequest(symbol, customText = null) {
+  if (signalSendBtn.disabled) return;
+  
+  const tf = $('signalTF').value;
+  let userText = customText || signalInput.value.trim();
+  let displaySymbol = symbol || "Market";
+
+  if (!userText && !symbol) return;
+
+  // If a symbol is passed from a quick button, format the text
+  if (symbol && !customText) {
+    userText = `Analyze ${symbol}`;
+  }
+
+  // Add user message to chat
+  const userMsg = document.createElement('div');
+  userMsg.className = 'msg user';
+  userMsg.textContent = userText;
+  signalChatMessages.appendChild(userMsg);
+  
+  // Clear input and scroll down
+  signalInput.value = '';
+  signalChatMessages.scrollTop = signalChatMessages.scrollHeight;
+
+  // UI: Shrink the orb to make room for chat
+  orbArea.classList.add('shrink');
+  
+  // Show typing indicator
+  signalTyping.classList.add('show');
+  signalChatMessages.scrollTop = signalChatMessages.scrollHeight;
+  signalSendBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/signal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: symbol || "GENERAL", timeframe: tf, text: userText })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    // Hide typing
+    signalTyping.classList.remove('show');
+
+    // Add AI response
+    const botMsg = document.createElement('div');
+    botMsg.className = 'msg bot';
+    
+    // Format the AI response (bold, buy/sell colors)
+    let formatted = data.signal
+      .replace(/\n/g, '<br>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\b(BUY)\b/g, '<span class="signal-buy">BUY</span>')
+      .replace(/\b(SELL)\b/g, '<span class="signal-sell">SELL</span>');
+      
+    botMsg.innerHTML = formatted;
+    signalChatMessages.appendChild(botMsg);
+
+  } catch (err) {
+    signalTyping.classList.remove('show');
+    const errMsg = document.createElement('div');
+    errMsg.className = 'msg bot';
+    errMsg.style.color = '#ff6b6b';
+    errMsg.textContent = `❌ Error: ${err.message}`;
+    signalChatMessages.appendChild(errMsg);
+  } finally {
+    signalSendBtn.disabled = false;
+    signalChatMessages.scrollTop = signalChatMessages.scrollHeight;
+  }
+}
+
+// Quick Symbol Buttons
+document.querySelectorAll('.quick-symbols button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    handleSignalRequest(btn.dataset.sym);
+  });
+});
+
+// Send Button
+signalSendBtn.addEventListener('click', () => {
+  handleSignalRequest(null);
+});
+
+// Enter key to send
+signalInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    handleSignalRequest(null);
+  }
+});
+
+// Back button to return to Calendar
+$('signalBackBtn').addEventListener('click', () => {
+  document.querySelector('.tab-btn[data-tab="calendar"]').click();
+});
