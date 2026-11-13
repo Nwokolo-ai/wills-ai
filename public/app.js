@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════════════════════
-//  app.js — Will's AI Frontend (Upgraded)
+//  app.js — Full Application
 // ═══════════════════════════════════════════════════════════
 
 let allEvents = [];
 let allNews = [];
 let dayFilter = 'today';
 let currencyFilter = 'all';
-let calendarSearch = ''; // NEW: Search
+let calendarSearch = '';
 let watchlistOnly = false;
 let newsCat = 'all';
 let newsSearch = '';
@@ -15,15 +15,15 @@ localStorage.setItem('wills_timezone_mode_v2', timezoneMode);
 let watchlist = [];
 let autoScrollDone = false;
 let lastLoadedAt = null;
-let tickerInterval = null; // NEW: Live ticker
-let hasPlayedSound = new Set(); // NEW: Prevent sound looping
+let tickerInterval = null;
+let hasPlayedSound = new Set();
+let resetToken = null;
 
 const $ = id => document.getElementById(id);
 
 const FLAGS = {
-  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵',
-  AUD: '🇦🇺', NZD: '🇳🇿', CAD: '🇨🇦', CHF: '🇨🇭',
-  CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', ALL: '🌐',
+  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', AUD: '🇦🇺', NZD: '🇳🇿', 
+  CAD: '🇨🇦', CHF: '🇨🇭', CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', ALL: '🌐',
 };
 function flag(code) { return FLAGS[(code || '').toUpperCase()] || '🏳️'; }
 
@@ -95,7 +95,6 @@ function formatCountdown(isoTimestamp) {
   return past ? `${text} ago` : `in ${text}`;
 }
 
-// NEW: Calculate deviation %
 function getDeviation(actual, forecast) {
   if (!actual || !forecast) return null;
   const a = parseFloat(String(actual).replace(/[^\d.-]/g, ''));
@@ -137,7 +136,6 @@ function formatTimeInMode(isoTimestamp, fallback = '—') {
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(/\s+/g, '').toLowerCase();
 }
 
-// ── Tabs ──
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -147,7 +145,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-// ── Theme ──
 function applyTheme(theme) {
   document.body.dataset.theme = theme;
   document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === theme));
@@ -158,9 +155,7 @@ document.querySelectorAll('.theme-btn').forEach(btn => {
 });
 applyTheme(localStorage.getItem('wills_theme') || 'dark');
 
-function eventKey(e) {
-  return `${e.date}|${e.time}|${e.currency}|${e.event}`;
-}
+function eventKey(e) { return `${e.date}|${e.time}|${e.currency}|${e.event}`; }
 
 function filterEvents(events) {
   let filtered = events;
@@ -168,17 +163,12 @@ function filterEvents(events) {
   else if (dayFilter === 'tomorrow') filtered = filtered.filter(e => isTomorrow(e.date));
   else if (dayFilter === 'week') filtered = filtered.filter(e => isThisWeek(e.date));
   
-  if (currencyFilter !== 'all') {
-    filtered = filtered.filter(e => (e.currency || '').toUpperCase() === currencyFilter);
-  }
-  // NEW: Search filter
+  if (currencyFilter !== 'all') filtered = filtered.filter(e => (e.currency || '').toUpperCase() === currencyFilter);
   if (calendarSearch) {
     const s = calendarSearch.toLowerCase();
     filtered = filtered.filter(e => (e.event || '').toLowerCase().includes(s));
   }
-  if (watchlistOnly) {
-    filtered = filtered.filter(e => watchlist.includes(eventKey(e)));
-  }
+  if (watchlistOnly) filtered = filtered.filter(e => watchlist.includes(eventKey(e)));
   return filtered;
 }
 
@@ -315,7 +305,6 @@ function renderCalendar() {
   setTimeout(autoScrollToLastPast, 100);
 }
 
-// NEW: Live Ticker & Sound
 function startTicker() {
   if (tickerInterval) clearInterval(tickerInterval);
   tickerInterval = setInterval(() => {
@@ -327,7 +316,6 @@ function startTicker() {
       const text = formatCountdown(ts);
       el.textContent = text;
 
-      // If it just hit 0 (or crossed into negative)
       if (text === '0s' || text.startsWith('0s ago')) {
         if (!hasPlayedSound.has(ts)) {
           hasPlayedSound.add(ts);
@@ -341,10 +329,7 @@ function startTicker() {
 function playSound() {
   try {
     const audio = $('alertSound');
-    if (audio) {
-      audio.volume = 0.5;
-      audio.play().catch(e => console.warn('Audio blocked by browser. User must interact first.'));
-    }
+    if (audio) { audio.volume = 0.5; audio.play().catch(e => {}); }
   } catch (e) {}
 }
 
@@ -419,8 +404,6 @@ async function loadNews() {
 
 async function refreshAll() { await Promise.all([loadCalendar(), loadNews()]); }
 
-// ... (Rest of UI Event Listeners: buttons, modal, auth, prefs remain mostly unchanged) ...
-
 document.querySelectorAll('[data-day]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('[data-day]').forEach(b => b.classList.remove('active'));
@@ -450,13 +433,11 @@ document.querySelectorAll('[data-cur]').forEach(btn => {
   });
 });
 
-// NEW: Calendar Search listener
 $('calendarSearch').addEventListener('input', e => {
   calendarSearch = e.target.value.trim();
   renderCalendar(); renderStats();
 });
 
-// Rest of the standard listeners...
 document.querySelectorAll('[data-cat]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('[data-cat]').forEach(b => b.classList.remove('active'));
@@ -566,7 +547,7 @@ $('tzToggle')?.addEventListener('click', () => {
   renderCalendar();
 });
 
-// Auth Login/Logout logic (Remains the same)
+// Auth UI Controls
 const authPanel = $('authPanel'); const authOverlay = $('authOverlay'); const authArea = $('authArea'); const prefPanel = $('prefPanel');
 
 function openAuth(view = 'login') { authPanel.classList.add('open'); authOverlay.classList.add('open'); showAuthView(view); }
@@ -583,20 +564,47 @@ $('toLogin').addEventListener('click', () => showAuthView('login'));
 $('toForgot').addEventListener('click', () => showAuthView('forgot'));
 $('backToLogin').addEventListener('click', () => showAuthView('login'));
 
-// NEW: Forgot Password Submit
+// Check URL for Reset Token
+function checkUrlForResetToken() {
+  const hash = window.location.hash;
+  if (hash && hash.includes('type=recovery')) {
+    const params = new URLSearchParams(hash.substring(1));
+    resetToken = params.get('access_token');
+    if (resetToken) {
+      openAuth('reset');
+      window.history.replaceState(null, null, window.location.pathname);
+    }
+  }
+}
+
 $('formForgot').addEventListener('submit', async e => {
   e.preventDefault();
   const errEl = $('forgotError'); errEl.classList.remove('show');
   const sucEl = $('forgotSuccess'); sucEl.classList.remove('show');
-  const btn = $('forgotSubmit');
-  btn.disabled = true; btn.textContent = 'Sending…';
+  const btn = $('forgotSubmit'); btn.disabled = true; btn.textContent = 'Sending…';
   try {
     await Auth.forgotPin($('forgotUsername').value.trim());
-    sucEl.textContent = 'Reset link sent! Check your email (and spam folder).';
+    sucEl.textContent = 'Reset link sent! Check your email.';
     sucEl.classList.add('show');
+  } catch (err) { errEl.textContent = err.message; errEl.classList.add('show'); } 
+  finally { btn.disabled = false; btn.textContent = 'Send Reset Link'; }
+});
+
+$('formReset').addEventListener('submit', async e => {
+  e.preventDefault();
+  const errEl = $('resetError'); errEl.classList.remove('show');
+  const btn = $('resetSubmit'); btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    if (!resetToken) throw new Error('Missing reset token. Please request a new link.');
+    await Auth.resetPin(resetToken, $('resetPin').value.trim());
+    alert('PIN successfully reset! Please log in.');
+    closeAuth();
+    showAuthView('login');
   } catch (err) {
     errEl.textContent = err.message; errEl.classList.add('show');
-  } finally { btn.disabled = false; btn.textContent = 'Send Reset Link'; }
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save New PIN';
+  }
 });
 
 $('formSignup').addEventListener('submit', async e => {
@@ -666,7 +674,6 @@ async function renderPrefs() {
 
   const p = profile || {};
   const currencies = new Set(p.currencies || ['USD','EUR','GBP']);
-  const categories = new Set(p.news_categories || ['forex']);
   const emailAlerts = p.email_alerts !== false;
   const alertMinutes = p.alert_minutes || 15;
   const alertImpact = p.alert_impact || 'high_medium';
@@ -678,6 +685,14 @@ async function renderPrefs() {
         <div class="switch ${emailAlerts ? 'on' : ''}" id="prefEmailToggle"></div>
       </div>
     </div>
+    
+    <div class="pref-section" style="text-align: center;">
+      <button class="pref-save" id="prefTestPush" style="background: var(--bg3); color: var(--text); border: 1px solid var(--border);">
+        🔔 Send Test Push Notification
+      </button>
+      <div id="pushTestResult" style="font-size: 12px; margin-top: 8px; color: var(--accent);"></div>
+    </div>
+
     <div class="pref-section">
       <label class="title">Alert me this many minutes before</label>
       <select class="pref-select" id="prefMinutes">
@@ -707,6 +722,20 @@ async function renderPrefs() {
   $('prefEmailToggle').addEventListener('click', () => { emailOn = !emailOn; $('prefEmailToggle').classList.toggle('on', emailOn); });
   document.querySelectorAll('#prefCurrencies .chip').forEach(c => c.addEventListener('click', () => c.classList.toggle('active')));
 
+  $('prefTestPush').addEventListener('click', async () => {
+    const resEl = $('pushTestResult'); resEl.textContent = 'Sending...'; resEl.style.color = 'var(--text)';
+    if (Notification.permission === 'default') {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { resEl.textContent = '❌ Blocked in browser settings.'; resEl.style.color = '#ff6b6b'; return; }
+    }
+    try {
+      const res = await fetch('/api/push/test');
+      if (res.ok) { resEl.textContent = '✅ Test sent!'; resEl.style.color = 'var(--accent)'; } 
+      else throw new Error();
+    } catch (err) { resEl.textContent = '❌ Failed to send.'; resEl.style.color = '#ff6b6b'; }
+    setTimeout(() => { resEl.textContent = ''; }, 5000);
+  });
+
   $('prefSave').addEventListener('click', async () => {
     const btn = $('prefSave'); btn.disabled = true; btn.textContent = 'Saving…';
     const chosenCurrencies = [...document.querySelectorAll('#prefCurrencies .chip.active')].map(c => c.dataset.val);
@@ -724,8 +753,58 @@ async function renderPrefs() {
   });
 }
 
-// Init
+// PWA Logic
+let deferredPrompt = null;
+let swRegistration = null;
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try { swRegistration = await navigator.serviceWorker.register('/sw.js'); } catch (e) {}
+  });
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const dismissed = localStorage.getItem('pwa_dismissed_at');
+  if (dismissed && (Date.now() - parseInt(dismissed) < 7 * 24 * 3600 * 1000)) return;
+  setTimeout(() => { if (deferredPrompt) $('pwaBanner')?.classList.add('show'); }, 15000);
+});
+
+if (window.navigator.standalone !== true) {
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (isIOS) {
+    const dismissed = localStorage.getItem('pwa_dismissed_at');
+    if (!dismissed || (Date.now() - parseInt(dismissed) > 7 * 24 * 3600 * 1000)) {
+      setTimeout(() => {
+        const banner = $('pwaBanner');
+        if (banner) {
+          banner.querySelector('.pwa-install').textContent = 'How to install';
+          banner.querySelector('.pwa-install').addEventListener('click', () => {
+            alert("To install on iPhone:\n1. Tap the 'Share' button at the bottom of Safari.\n2. Scroll down and tap 'Add to Home Screen'.");
+          });
+          banner.classList.add('show');
+        }
+      }, 15000);
+    }
+  }
+}
+
+$('pwaInstall')?.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  $('pwaBanner')?.classList.remove('show');
+});
+
+$('pwaDismiss')?.addEventListener('click', () => {
+  localStorage.setItem('pwa_dismissed_at', String(Date.now()));
+  $('pwaBanner')?.classList.remove('show');
+});
+
 (async function init() {
+  checkUrlForResetToken();
   if (Auth.isLoggedIn) await Auth.ensureFresh();
   $('tzToggle').textContent = `🌍 ${getTimezoneFullLabel()}`;
   renderAuthArea();
