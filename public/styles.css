@@ -155,7 +155,13 @@ tbody tr.day td .today {
 .val-actual.miss { color: var(--miss); }
 .val-forecast { color: #58a6ff; }
 .val-previous { color: var(--text-dim); }
-.countdown { color: var(--accent); font-weight: 600; margin-left: auto; }
+.countdown { 
+  color: var(--accent); 
+  font-weight: 600; 
+  margin-left: auto; 
+  white-space: nowrap; /* ADD THIS */
+  font-size: 11px;     /* ADD THIS */
+}
 .star-icon { color: #fbbf24; margin-right: 4px; }
 
 /* ── NEWS ── */
