@@ -53,7 +53,6 @@ function toTimeString(isoTime) {
   }).toLowerCase().replace(/\s+/g, '');
 }
 
-// ── FIX #3: include date in key so all-day events don't collide ──
 function makeKey(isoTime, currency, name, dateStr) {
   const t = (isoTime || dateStr || 'allday').toLowerCase();
   const c = (currency || '').toLowerCase();
@@ -61,42 +60,18 @@ function makeKey(isoTime, currency, name, dateStr) {
   return `${t}|${c}|${n}`;
 }
 
-// ── FIX #1: coerce empty-string actuals to null ──
 function cleanField(v) {
   if (v == null) return null;
   const s = String(v).trim();
   return s === '' ? null : s;
 }
 
-function toDbRow(e) {
-  const isoTime = e.time || null;
-  const name = (e.name || '').trim();
-  const currency = (e.currency || '').toUpperCase().trim();
-  const dateStr = toIsoDate(isoTime) || new Date().toISOString().slice(0, 10);
-  return {
-    event_key: makeKey(isoTime, currency, name, dateStr),
-    event_date: dateStr,
-    event_time: toTimeString(isoTime),
-    event_timestamp: isoTime,
-    currency,
-    impact: normalizeImpact(e.importance),
-    title: name,
-    actual: cleanField(e.actual),
-    forecast: cleanField(e.forecast),
-    previous: cleanField(e.previous),
-    beat_miss: beatMiss(cleanField(e.actual), cleanField(e.forecast)),
-    source: e.source || 'biquote',
-    updated_at: new Date().toISOString(),
-  };
-}
-
 function validateRows(rows) {
   return rows.filter(r => {
     if (!r.event_key || r.event_key.length < 8) return false;
     if (!r.event_date) return false;
-    if (!r.currency || r.currency.length < 3) return false;
+    if (!r.currency || r.currency.length < 2) return false;
     if (!r.title || r.title.length < 2) return false;
-    if (!/^[A-Z]{2,4}$/.test(r.currency) && r.currency !== 'ALL') return false;
     return true;
   });
 }
@@ -115,26 +90,49 @@ async function pushToSupabase(rows) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  FETCH
+//  FETCH (Fixed for Biquote's actual API)
 // ═══════════════════════════════════════════════════════════
 
 async function fetchBiquote() {
   const bq = new Biquote();
-  const now = new Date();
-  const from = now.toISOString().slice(0, 10);
-  const to = new Date(now.getTime() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  console.log(`[ff] biquote fetch ${from} → ${to}`);
-  const events = await bq.calendar({ from, to, limit: 500 });
+  console.log('[ff] biquote fetch (default rolling window)');
+  
+  // Biquote does NOT accept from/to. It uses its own default window.
+  const events = await bq.calendar({ limit: 500 });
+  
   if (!Array.isArray(events)) throw new Error('Biquote returned non-array');
-  console.log(`[ff] biquote returned ${events.length}`);
-  return events.map(toDbRow);
+  console.log(`[ff] biquote returned ${events.length} raw events`);
+  
+  return events.map(e => {
+    // Map Biquote's raw fields to our DB schema.
+    // Note: Biquote sometimes uses `country` or `countryCode` instead of `currency`.
+    const isoTime = e.time || e.date || null;
+    const name = (e.name || e.title || '').trim();
+    const currency = (e.currency || e.country || e.countryCode || '').toUpperCase().trim();
+    const dateStr = toIsoDate(isoTime) || new Date().toISOString().slice(0, 10);
+
+    return {
+      event_key: makeKey(isoTime, currency, name, dateStr),
+      event_date: dateStr,
+      event_time: toTimeString(isoTime),
+      event_timestamp: isoTime,
+      currency,
+      impact: normalizeImpact(e.importance),
+      title: name,
+      actual: cleanField(e.actual),
+      forecast: cleanField(e.forecast),
+      previous: cleanField(e.previous),
+      beat_miss: beatMiss(cleanField(e.actual), cleanField(e.forecast)),
+      source: 'biquote',
+      updated_at: new Date().toISOString(),
+    };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════
-//  NEW-ACTUAL DETECTION
+//  NEW-ACTUAL DETECTION & SEEDING
 // ═══════════════════════════════════════════════════════════
 
-// ── FIX #2: seed previousActuals from DB on first run ──
 async function seedPreviousActuals() {
   if (previousActualsSeeded) return;
   previousActualsSeeded = true;
@@ -151,7 +149,6 @@ async function seedPreviousActuals() {
     console.log(`[ff] seeded ${previousActuals.size} previous actuals`);
   } catch (e) {
     console.error('[ff] seed failed:', e.message);
-    // Allow retry on next scrape
     previousActualsSeeded = false;
   }
 }
@@ -203,7 +200,7 @@ async function scrape() {
 
     const deduped = [...new Map(allRows.map(r => [r.event_key, r])).values()];
     const valid = validateRows(deduped);
-    console.log(`[ff] ${valid.length} valid rows`);
+    console.log(`[ff] ${valid.length} valid rows after dedup/validation`);
 
     const newActuals = detectNewActuals(valid);
     await pushToSupabase(valid);
@@ -337,7 +334,6 @@ async function scheduleNextEventRefresh() {
 //  CLEANUP — removes old DB rows + prunes memory map
 // ═══════════════════════════════════════════════════════════
 
-// ── FIX #4: prune previousActuals alongside DB rows ──
 async function cleanup() {
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
 
