@@ -82,6 +82,24 @@ async function forgotPin(username) {
   return { success: true };
 }
 
-// ... [Keep your existing getUpcomingEvents, refresh, getProfile, updateProfile functions] ...
+// Add this function to auth.js
 
-module.exports = { signup, login, forgotPin, refresh, getProfile, updateProfile };
+async function resetPinWithToken(accessToken, newPin) {
+  if (!accessToken || !newPin) throw new Error('Missing token or PIN');
+  if (newPin.length < 6 || newPin.length > 12) throw new Error('PIN must be 6-12 digits');
+
+  // 1. Verify the token and get the user
+  const { data: userData, error: uErr } = await admin.auth.getUser(accessToken);
+  if (uErr || !userData?.user) throw new Error('Reset link expired or invalid');
+
+  // 2. Update their password (PIN)
+  const { error: updateErr } = await admin.auth.admin.updateUserById(userData.user.id, {
+    password: newPin
+  });
+  
+  if (updateErr) throw new Error('Failed to update PIN: ' + updateErr.message);
+  return { success: true };
+}
+
+// Add it to your exports:
+module.exports = { signup, login, forgotPin, resetPinWithToken, refresh, getProfile, updateProfile };
