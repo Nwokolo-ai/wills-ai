@@ -23,11 +23,13 @@ const $ = id => document.getElementById(id);
 
 // UPDATED: Added RUB and DIN
 const FLAGS = {
-  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', AUD: '🇦🇺', NZD: '🇳🇿', 
-  CAD: '🇨🇦', CHF: '🇨🇭', CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', 
-  RON: '🇷🇴', TRY: '🇹🇷', HUF: '🇭🇺', PLN: '🇵🇱', HKD: '🇭🇰', 
-  BGN: '🇧🇬', CZK: '🇨🇿', INR: '🇮🇳', BRL: '🇧🇷', KZT: '🇰🇿', 
-  RUB: '🇷🇺', DIN: '🇷🇸', ALL: '🌐',
+  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵',
+  AUD: '🇦🇺', NZD: '🇳🇿', CAD: '🇨🇦', CHF: '🇨🇭',
+  CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', 
+  RON: '🇷🇴', TRY: '🇹🇷', HUF: '🇭🇺', PLN: '🇵🇱',
+  HKD: '🇭🇰', BGN: '🇧🇬', CZK: '🇨🇿', INR: '🇮🇳', 
+  BRL: '🇧🇷', KZT: '🇰🇿', RUB: '🇷🇺', DIN: '🇷🇸', 
+  ZAR: '🇿🇦', ILS: '🇮🇱', ALL: '🌐',
 };
 function flag(code) { return FLAGS[(code || '').toUpperCase()] || '🏳️'; }
 
