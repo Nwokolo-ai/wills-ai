@@ -840,3 +840,37 @@ $('pwaDismiss')?.addEventListener('click', () => {
   setInterval(refreshAll, 60000);
   setInterval(updateLastUpdated, 30000);
 })();
+// ── SIGNAL GENERATOR LOGIC ──
+const signalBtn = $('generateSignalBtn');
+const signalResult = $('signalResult');
+
+if (signalBtn) {
+  signalBtn.addEventListener('click', async () => {
+    const symbol = $('signalSymbol').value;
+    const timeframe = $('signalTF').value;
+
+    signalBtn.disabled = true;
+    signalBtn.textContent = 'Analyzing Market...';
+    signalResult.classList.remove('show');
+
+    try {
+      const res = await fetch('/api/signal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, timeframe })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      signalResult.innerHTML = `<strong>${symbol} (${timeframe.toUpperCase()})</strong><br><br>${data.signal.replace(/\n/g, '<br>')}`;
+      signalResult.classList.add('show');
+      
+    } catch (err) {
+      alert('Error: ' + err.message);
+    } finally {
+      signalBtn.disabled = false;
+      signalBtn.textContent = 'Generate Signal';
+    }
+  });
+}
