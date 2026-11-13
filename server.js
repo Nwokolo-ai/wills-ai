@@ -247,3 +247,12 @@ app.post('/api/telegram/webhook', async (req, res) => {
   } catch (err) { console.error('[webhook]', err.message); }
   res.sendStatus(200);
 });
+// Add this route below the forgot route in server.js
+app.post('/api/auth/reset-pin', authLimiter, async (req, res) => {
+  try {
+    const { accessToken, newPin } = req.body;
+    res.json(await auth.resetPinWithToken(accessToken, newPin));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
