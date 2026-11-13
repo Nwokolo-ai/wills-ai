@@ -8,8 +8,8 @@
 <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="/styles.css" />
 <style>
-  #authPanel, #prefPanel, #authOverlay, #eventModal, #createStrategyModal { display: none !important; }
-  #authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open, #createStrategyModal.open { display: flex !important; }
+  #authPanel, #prefPanel, #authOverlay, #eventModal { display: none !important; }
+  #authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open { display: flex !important; }
 </style>
 </head>
 <body data-theme="dark">
@@ -43,7 +43,6 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="calendar">📅 Calendar</button>
   <button class="tab-btn" data-tab="news">📰 News</button>
-  <button class="tab-btn" data-tab="strategies">🤖 Strategies</button>
   <span class="last-updated" id="lastUpdated">—</span>
 </div>
 
@@ -114,25 +113,6 @@
   </div>
 </div>
 
-<div class="panel" id="panel-strategies">
-  <!-- Main Tabs: Public vs Private -->
-  <div class="news-controls" style="border-bottom: none; padding-bottom: 0;">
-    <button class="day-btn active" id="btnPublic" onclick="setMainTab('public')">🌍 Public Strategies</button>
-    <button class="day-btn" id="btnPrivate" onclick="setMainTab('private')">🔒 My Private Strategies</button>
-    <button class="day-btn" style="margin-left:auto; background:var(--accent); color:var(--bg); font-weight:700;" onclick="openStrategyModal()">+ Create Strategy</button>
-  </div>
-
-  <!-- Sub Tabs: Manual vs AI Assist -->
-  <div class="news-controls" style="padding-top: 8px;">
-    <button class="day-btn active" id="btnManual" onclick="setSubTab('manual')">📊 Manual Logic</button>
-    <button class="day-btn" id="btnAI" onclick="setSubTab('ai_assisted')">🤖 AI Assisted</button>
-  </div>
-
-  <div class="news-grid" id="strategyGrid">
-    <div class="empty">Loading strategies…</div>
-  </div>
-</div>
-
 <div class="auth-overlay" id="authOverlay"></div>
 
 <aside class="auth-panel" id="authPanel">
@@ -179,41 +159,8 @@
         <span>Already have an account?</span>
         <button type="button" class="auth-link" id="toLogin">Log in →</button>
       </div>
-      
     </form>
   </div>
-  <!-- Forgot Password View -->
-<div class="auth-view" id="viewForgot">
-  <h2>Reset your PIN</h2>
-  <p class="auth-sub">Enter your username and email to receive a reset code.</p>
-  
-  <!-- Step 1: Request Code -->
-  <form id="formForgot" class="auth-form">
-    <label>Username
-      <input type="text" id="forgotUsername" placeholder="Your username" required />
-    </label>
-    <label>Email
-      <input type="email" id="forgotEmail" placeholder="you@example.com" required />
-    </label>
-    <div class="auth-error" id="forgotError"></div>
-    <button type="submit" class="auth-submit" id="forgotSubmit">Send Reset Code</button>
-    <div class="auth-links">
-      <button type="button" class="auth-link" id="toLoginFromForgot">← Back to login</button>
-    </div>
-  </form>
-
-  <!-- Step 2: Enter Code & New PIN (Hidden initially) -->
-  <form id="formReset" class="auth-form" style="display: none;">
-    <label>Reset Code
-      <input type="text" id="resetCode" placeholder="123456" inputmode="numeric" required />
-    </label>
-    <label>New PIN
-      <input type="password" id="resetNewPin" placeholder="At least 6 digits" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" required />
-    </label>
-    <div class="auth-error" id="resetError"></div>
-    <button type="submit" class="auth-submit" id="resetSubmit">Update PIN</button>
-  </form>
-</div>
 </aside>
 
 <aside class="pref-panel" id="prefPanel">
@@ -232,99 +179,6 @@
   </div>
 </div>
 
-<!-- Create Strategy Modal -->
-<div class="modal-overlay" id="createStrategyModal">
-  <div class="modal-box" style="max-width: 750px;">
-    <button class="modal-close" id="closeStrategyModal" aria-label="Close">✕</button>
-    
-    <!-- VIEW 1: THE GUIDE -->
-    <div id="viewStratGuide" class="strat-view active">
-      <h2 style="margin-bottom: 8px;">How to Create a Strategy</h2>
-      <p class="auth-sub">Your strategy will run 24/7 on our servers. It checks the market and places trades automatically.</p>
-      
-      <div style="background: var(--bg3); padding: 16px; border-radius: 10px; margin-bottom: 16px; font-size: 13px;">
-        <h3 style="color: var(--accent); margin-bottom: 8px;">📦 The SDK Functions</h3>
-        <ul style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px;">
-          <li><code style="color:#58a6ff;">getMarketData(symbol, timeframe)</code> <br> Gets price candles. Example: <code>'BTCUSDT', '1h'</code></li>
-          <li><code style="color:#58a6ff;">getUpcomingEvents(currency)</code> <br> Gets high-impact news. Example: <code>'USD'</code></li>
-          <li><code style="color:#58a6ff;">openTrade(symbol, 'BUY', price)</code> <br> Opens a trade and starts tracking PnL.</li>
-          <li><code style="color:#58a6ff;">closeTrade(tradeId, price)</code> <br> Closes the trade and calculates your win rate.</li>
-          <li><code style="color:#3fb950;">askAI(prompt)</code> <br> (For AI Strategies) Sends market data to the AI to get a BUY/SELL decision.</li>
-          <li><code style="color:#fbbf24;">log(message)</code> <br> Prints a message to the server logs for debugging.</li>
-        </ul>
-      </div>
-
-      <div style="background: #0d1117; padding: 12px; border-radius: 10px; border: 1px solid var(--border); overflow-x: auto; margin-bottom: 20px;">
-        <pre style="font-size: 12px; color: #e6edf3; margin: 0;"><code>// Example Strategy
-const { getMarketData, openTrade, closeTrade, log } = require('../../shared/sdk.js');
-let activeTrade = null;
-
-async function run() {
-  const data = await getMarketData('BTCUSDT', '1h', 50);
-  const price = data[data.length - 1].close;
-
-  if (!activeTrade && price > 60000) {
-    activeTrade = await openTrade('BTCUSDT', 'BUY', price);
-    log('Bought BTC!');
-  } else if (activeTrade && price > 65000) {
-    await closeTrade(activeTrade, price);
-    activeTrade = null;
-    log('Sold for profit!');
-  }
-}
-module.exports = { run };</code></pre>
-      </div>
-
-      <button type="button" class="auth-submit" id="btnStartCoding" style="width: 100%;">📝 Start Coding →</button>
-    </div>
-
-    <!-- VIEW 2: THE EDITOR -->
-    <div id="viewStratEditor" class="strat-view" style="display: none;">
-      <h2 style="margin-bottom: 16px;">Strategy Editor</h2>
-      
-      <div class="auth-form" style="gap: 12px;">
-        <label>Strategy Name
-          <input type="text" id="stratName" placeholder="e.g., Gold Breakout 5m" required />
-        </label>
-
-        <label>Description
-          <input type="text" id="stratDesc" placeholder="Briefly explain how it works..." />
-        </label>
-
-        <div style="display: flex; gap: 16px; margin-top: 8px;">
-          <label style="flex: 1; flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" id="stratIsPublic" checked style="width: auto; padding: 0;" />
-            Publish to Public Marketplace
-          </label>
-        </div>
-
-        <div style="display: flex; gap: 16px; margin-top: 8px; background: var(--bg3); padding: 12px; border-radius: 8px;">
-          <label style="flex: 1; flex-direction: row; align-items: center; gap: 8px;">
-            <input type="radio" name="stratType" value="manual" checked />
-            📊 Manual Logic
-          </label>
-          <label style="flex: 1; flex-direction: row; align-items: center; gap: 8px;">
-            <input type="radio" name="stratType" value="ai_assisted" />
-            🤖 AI Assisted
-          </label>
-        </div>
-
-        <label style="margin-top: 8px;">
-          Strategy Code (JavaScript)
-          <textarea id="stratCode" rows="12" style="width: 100%; background: #0d1117; color: #00f5a0; font-family: ui-monospace, monospace; padding: 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px;" placeholder="// Paste your code here..."></textarea>
-        </label>
-
-        <div class="auth-error" id="stratError"></div>
-        
-        <div style="display: flex; gap: 10px; margin-top: 10px;">
-          <button type="button" class="auth-submit" id="btnBackToGuide" style="flex: 1; background: var(--bg3); color: var(--text);">← Back</button>
-          <button type="button" class="auth-submit" id="saveStrategyBtn" style="flex: 2;">Save Strategy</button>
-        </div>
-      </div>
-    </div>
-
-  </div>
-</div>
 <script src="/auth-client.js"></script>
 <script src="/app.js"></script>
 </body>
