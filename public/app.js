@@ -9,15 +9,13 @@ let currencyFilter = 'all';
 let watchlistOnly = false;
 let newsCat = 'all';
 let newsSearch = '';
+// DEFAULT IS LOCAL — user sees their own timezone first
+// New key v2 — forces everyone to reset to 'local' default
 let timezoneMode = localStorage.getItem('wills_timezone_mode_v2') || 'local';
 localStorage.setItem('wills_timezone_mode_v2', timezoneMode);
 let watchlist = [];
 let autoScrollDone = false;
 let lastLoadedAt = null;
-
-// Strategy Variables
-let mainTab = 'public';
-let subTab = 'manual';
 
 const $ = id => document.getElementById(id);
 
@@ -121,6 +119,7 @@ function formatTimeOffsetBadge() {
   return getTimezoneOffsetString();
 }
 
+// ── KEY FUNCTION: This does the actual UTC → local conversion ──
 function formatTimeInMode(isoTimestamp, fallback = '—') {
   if (!isoTimestamp) return fallback;
   const d = new Date(isoTimestamp);
@@ -130,6 +129,7 @@ function formatTimeInMode(isoTimestamp, fallback = '—') {
       hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC',
     }).replace(/\s+/g, '').toLowerCase();
   }
+  // LOCAL mode: convert to user's browser timezone
   return d.toLocaleTimeString(undefined, {
     hour: 'numeric', minute: '2-digit', hour12: true,
   }).replace(/\s+/g, '').toLowerCase();
@@ -156,11 +156,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     $('panel-' + btn.dataset.tab).classList.add('active');
-    
-    // Load strategies when the tab is clicked
-    if (btn.dataset.tab === 'strategies') {
-      loadStrategies();
-    }
   });
 });
 
@@ -615,217 +610,6 @@ $('tzToggle')?.addEventListener('click', () => {
   renderCalendar();
 });
 
-// ═══════════════════════════════════════════════════════════
-//  STRATEGY MARKETPLACE LOGIC
-// ═══════════════════════════════════════════════════════════
-
-function setMainTab(tab) {
-  mainTab = tab;
-  $('btnPublic').classList.toggle('active', tab === 'public');
-  $('btnPrivate').classList.toggle('active', tab === 'private');
-  loadStrategies();
-}
-
-function setSubTab(tab) {
-  subTab = tab;
-  $('btnManual').classList.toggle('active', tab === 'manual');
-  $('btnAI').classList.toggle('active', tab === 'ai_assisted');
-  loadStrategies();
-}
-
-async function loadStrategies() {
-  const grid = $('strategyGrid');
-  grid.innerHTML = '<div class="empty">Loading strategies…</div>';
-  
-  try {
-    // We fetch from our backend, which securely queries Supabase
-    const url = `/api/strategies?is_public=${mainTab === 'public'}&type=${subTab}`;
-    const res = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${Auth.accessToken || ''}` }
-    });
-    
-    if (!res.ok) throw new Error("Failed to load strategies");
-    const data = await res.json();
-
-    if (!data.strategies || data.strategies.length === 0) {
-      grid.innerHTML = `<div class="empty">No ${subTab} strategies found in ${mainTab}.</div>`;
-      return;
-    }
-
-    let html = '';
-    for (const s of data.strategies) {
-      // Fetch performance stats for each strategy
-      let stats = { winRate: 0, totalPnl: 0, totalTrades: 0 };
-      try {
-        const statRes = await fetch(`/api/strategies/${s.id}/stats`);
-        if (statRes.ok) stats = await statRes.json();
-      } catch (e) { console.warn('Stats failed for', s.id); }
-
-      const pnlColor = stats.totalPnl >= 0 ? 'var(--accent)' : 'var(--high)';
-      const statusColor = s.status === 'running' ? 'var(--accent)' : 'var(--text-dim)';
-      const typeIcon = s.strategy_type === 'ai_assisted' ? '🤖' : '📊';
-
-      html += `
-        <div class="news-card">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h3>${esc(s.name)} ${typeIcon}</h3>
-            <span style="font-size:10px; color:${statusColor}; text-transform:uppercase;">● ${esc(s.status)}</span>
-          </div>
-          <p>${esc(s.description || 'No description provided.')}</p>
-          
-          <div style="display:flex; gap:10px; margin: 10px 0; background:var(--bg3); padding:10px; border-radius:8px;">
-            <div style="flex:1; text-align:center;">
-              <div style="font-size:10px; color:var(--text-dim);">Win Rate</div>
-              <div style="font-weight:700;">${stats.winRate}%</div>
-            </div>
-            <div style="flex:1; text-align:center; border-left:1px solid var(--border);">
-              <div style="font-size:10px; color:var(--text-dim);">Total PnL</div>
-              <div style="font-weight:700; color:${pnlColor};">${stats.totalPnl > 0 ? '+' : ''}${stats.totalPnl}%</div>
-            </div>
-            <div style="flex:1; text-align:center; border-left:1px solid var(--border);">
-              <div style="font-size:10px; color:var(--text-dim);">Trades</div>
-              <div style="font-weight:700;">${stats.totalTrades}</div>
-            </div>
-          </div>
-
-          <div class="news-meta" style="margin-bottom:10px;">
-            <span>By @${esc(s.profiles?.username || 'Unknown')}</span>
-          </div>
-          
-          <button class="auth-submit" onclick="launchStrategy('${s.id}', '${s.strategy_type}')" style="margin-top:auto;">
-            🚀 Run Strategy
-          </button>
-        </div>
-      `;
-    }
-    
-    grid.innerHTML = html;
-    
-  } catch (err) {
-    grid.innerHTML = `<div class="empty">Error: ${esc(err.message)}</div>`;
-  }
-}
-
-async function launchStrategy(id, type) {
-  if (!Auth.isLoggedIn) {
-    alert("Please log in to run a strategy.");
-    return;
-  }
-
-  let user_ai_key = null;
-  if (type === 'ai_assisted') {
-    user_ai_key = prompt("This is an AI-Assisted Strategy. Please enter your Mistral API Key:");
-    if (!user_ai_key) return; 
-    // Note: To make AI work here, you can save the key temporarily to the DB or use the platform's key
-  }
-
-  try {
-    const res = await fetch(`/api/strategies/${id}/toggle`, { 
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Auth.accessToken}`
-      },
-      body: JSON.stringify({ status: 'running' })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to launch');
-    
-    alert('✅ Strategy started! It will run automatically every minute.');
-    loadStrategies();
-  } catch (err) {
-    alert('❌ Failed to launch: ' + err.message);
-  }
-}
-
-// Modal Logic
-function openStrategyModal() {
-  if (!Auth.isLoggedIn) {
-    alert("Please log in to create a strategy.");
-    return;
-  }
-  $('stratError').classList.remove('show');
-  $('createStrategyModal').classList.add('open');
-  showStrategyView('guide'); // Always open to the guide first
-}
-
-function closeStrategyModal() {
-  $('createStrategyModal').classList.remove('open');
-}
-
-function showStrategyView(view) {
-  if (view === 'guide') {
-    $('viewStratGuide').style.display = 'block';
-    $('viewStratEditor').style.display = 'none';
-  } else {
-    $('viewStratGuide').style.display = 'none';
-    $('viewStratEditor').style.display = 'block';
-  }
-}
-
-// Button Listeners
-$('closeStrategyModal')?.addEventListener('click', closeStrategyModal);
-$('createStrategyModal')?.addEventListener('click', (e) => {
-  if (e.target.id === 'createStrategyModal') closeStrategyModal();
-});
-
-$('btnStartCoding')?.addEventListener('click', () => showStrategyView('editor'));
-$('btnBackToGuide')?.addEventListener('click', () => showStrategyView('guide'));
-
-// Save Strategy
-$('saveStrategyBtn')?.addEventListener('click', async () => {
-  const btn = $('saveStrategyBtn');
-  const errEl = $('stratError');
-  errEl.classList.remove('show');
-
-  const name = $('stratName').value.trim();
-  const description = $('stratDesc').value.trim();
-  const is_public = $('stratIsPublic').checked;
-  const strategy_type = document.querySelector('input[name="stratType"]:checked').value;
-  const code = $('stratCode').value.trim();
-
-  if (!name || !code) {
-    errEl.textContent = "Name and Code are required.";
-    errEl.classList.add('show');
-    return;
-  }
-
-  btn.disabled = true; 
-  btn.textContent = 'Saving…';
-
-  try {
-    const res = await fetch('/api/strategies', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Auth.accessToken}`
-      },
-      body: JSON.stringify({ name, description, is_public, strategy_type, code })
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to save strategy');
-
-    closeStrategyModal();
-    $('stratName').value = '';
-    $('stratDesc').value = '';
-    $('stratCode').value = '';
-    
-    loadStrategies();
-    
-  } catch (err) {
-    errEl.textContent = err.message;
-    errEl.classList.add('show');
-  } finally {
-    btn.disabled = false; 
-    btn.textContent = 'Save Strategy';
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-//  AUTH & PREFERENCES LOGIC
-// ═══════════════════════════════════════════════════════════
-
 const authPanel = $('authPanel');
 const authOverlay = $('authOverlay');
 const authArea = $('authArea');
@@ -1219,84 +1003,3 @@ pollForNewActuals();
   setInterval(() => { if (dayFilter !== 'all') renderCalendar(); }, 30000);
   setInterval(updateLastUpdated, 30000);
 })();
-// ── FORGOT PASSWORD LOGIC ──
-
-$('toForgot')?.addEventListener('click', () => {
-  showAuthView('forgot');
-  $('formForgot').style.display = 'flex';
-  $('formReset').style.display = 'none';
-  $('forgotError').classList.remove('show');
-  $('resetError').classList.remove('show');
-});
-
-$('toLoginFromForgot')?.addEventListener('click', () => showAuthView('login'));
-
-// Step 1: Request Code
-$('formForgot')?.addEventListener('submit', async e => {
-  e.preventDefault();
-  const btn = $('forgotSubmit');
-  const errEl = $('forgotError');
-  errEl.classList.remove('show');
-
-  const username = $('forgotUsername').value.trim();
-  const email = $('forgotEmail').value.trim();
-
-  btn.disabled = true;
-  btn.textContent = 'Sending…';
-
-  try {
-    const res = await fetch('/api/auth/forgot-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, email })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-
-    // Switch to Step 2
-    $('formForgot').style.display = 'none';
-    $('formReset').style.display = 'flex';
-    
-  } catch (err) {
-    errEl.textContent = err.message;
-    errEl.classList.add('show');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Send Reset Code';
-  }
-});
-
-// Step 2: Reset PIN
-$('formReset')?.addEventListener('submit', async e => {
-  e.preventDefault();
-  const btn = $('resetSubmit');
-  const errEl = $('resetError');
-  errEl.classList.remove('show');
-
-  const username = $('forgotUsername').value.trim();
-  const code = $('resetCode').value.trim();
-  const newPin = $('resetNewPin').value.trim();
-
-  btn.disabled = true;
-  btn.textContent = 'Updating…';
-
-  try {
-    const res = await fetch('/api/auth/reset-pin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, code, newPin })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-
-    alert('✅ PIN updated successfully! You can now log in.');
-    showAuthView('login');
-    
-  } catch (err) {
-    errEl.textContent = err.message;
-    errEl.classList.add('show');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Update PIN';
-  }
-});
