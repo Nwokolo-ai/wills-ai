@@ -34,11 +34,18 @@ const Auth = {
     return { session: data.session, profile };
   },
 
-  // NEW: Forgot Pin
   async forgotPin(username) {
     const res = await fetch('/api/auth/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not send reset link');
+    return true;
+  },
+
+  async resetPin(token, newPin) {
+    if (!/^\d{6,12}$/.test(newPin)) throw new Error('PIN must be 6-12 digits');
+    const res = await fetch('/api/auth/reset-pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken: token, newPin }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to reset PIN');
     return true;
   },
 
