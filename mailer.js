@@ -113,4 +113,20 @@ async function sendEmail({ to, subject, html }) {
   }
 }
 
-module.exports = { sendEmail, welcomeEmail, eventAlertEmail, newsAlertEmail };
+// ... [Keep your existing imports and baseTemplate] ...
+
+function resetPinEmail(username, link) {
+  const body = `
+    <div class="card">
+      <h1>Reset your PIN</h1>
+      <p>Hi <strong>${username}</strong>, we received a request to reset your PIN. Click the button below to set a new one.</p>
+      <a href="${link}" class="cta">Reset My PIN</a>
+      <p style="margin-top:20px; font-size:12px;">If the button doesn't work, copy and paste this link:<br>
+      <a href="${link}" style="color:#00d4ff; word-break: break-all;">${link}</a></p>
+      <p style="margin-top:20px; font-size:12px; color:#8b949e;">If you didn't request this, you can safely ignore this email.</p>
+    </div>`;
+  return { subject: 'Reset your Will\'s AI PIN', html: baseTemplate('Reset PIN', body) };
+}
+
+// Add it to exports:
+module.exports = { sendEmail, welcomeEmail, eventAlertEmail, newsAlertEmail, resetPinEmail };
