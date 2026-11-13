@@ -32,7 +32,10 @@ try {
       process.env.VAPID_PRIVATE_KEY
     );
     console.log('[push] configured');
-  } else { webpush = null; }
+  } else {
+    console.warn('[push] VAPID keys missing');
+    webpush = null;
+  }
 } catch (e) { webpush = null; }
 
 app.set('trust proxy', 1);
@@ -40,9 +43,11 @@ app.use(cors());
 app.use(express.json({ limit: '100kb' }));
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 10,
+  windowMs: 15 * 60 * 1000, 
+  max: 10,
   message: { error: 'Too many attempts, please try again in 15 minutes.' },
-  standardHeaders: true, legacyHeaders: false,
+  standardHeaders: true, 
+  legacyHeaders: false,
 });
 
 app.use(express.static(PUBLIC_DIR, {
@@ -103,23 +108,51 @@ app.get('/api/news', (req, res) => {
 // ═══════════════════════════════════════════════════════════
 app.post('/api/signal', async (req, res) => {
   try {
-    const { symbol, timeframe } = req.body;
+    const { symbol, timeframe, text } = req.body;
     const mistralKey = process.env.MISTRAL_API_KEY;
 
-    if (!mistralKey) return res.status(500).json({ error: 'Mistral API key missing on server. Please add MISTRAL_API_KEY to .env.local' });
-    if (!symbol || !timeframe) return res.status(400).json({ error: 'Symbol and timeframe required' });
-
-    // 1. Fetch data from Biquote
-    const bq = new Biquote();
-    
-    // Biquote uses string symbols usually like "BTCUSD" or "EURUSD"
-    const ohlcData = await bq.ohlc(symbol, { interval: timeframe, limit: 150 }).catch(() => null);
-    
-    if (!ohlcData || !ohlcData.bars || ohlcData.bars.length < 10) {
-      return res.status(400).json({ error: 'Could not fetch enough market data from Biquote for this symbol.' });
+    if (!mistralKey) {
+      return res.status(500).json({ error: 'Mistral API key missing on server. Please add MISTRAL_API_KEY to .env.local' });
+    }
+    if (!timeframe) {
+      return res.status(400).json({ error: 'Timeframe is required' });
     }
 
-    // Reverse to chronological order (oldest to newest)
+    // 1. Determine what to analyze (from button or text)
+    let targetSymbol = symbol;
+    if (!targetSymbol || targetSymbol === "GENERAL") {
+      const lower = (text || "").toLowerCase();
+      if (lower.includes('gold') || lower.includes('xau')) targetSymbol = 'XAUUSD';
+      else if (lower.includes('eur')) targetSymbol = 'EURUSD';
+      else if (lower.includes('gbp')) targetSymbol = 'GBPUSD';
+      else if (lower.includes('btc') || lower.includes('bitcoin')) targetSymbol = 'BTCUSD';
+      else if (lower.includes('silver') || lower.includes('xag')) targetSymbol = 'XAGUSD';
+    }
+
+    // If it's just general chat (no trading symbol found)
+    if (!targetSymbol && text) {
+      const chatRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
+        body: JSON.stringify({
+          model: 'open-mistral-7b',
+          messages: [{ role: 'user', content: text }],
+          temperature: 0.7, max_tokens: 200
+        })
+      });
+      const chatData = await chatRes.json();
+      if (!chatRes.ok) throw new Error(chatData.error?.message || 'Mistral Error');
+      return res.json({ signal: chatData.choices[0].message.content });
+    }
+
+    // 2. Fetch data from Biquote
+    const bq = new Biquote();
+    const ohlcData = await bq.ohlc(targetSymbol, { interval: timeframe, limit: 150 }).catch(() => null);
+    
+    if (!ohlcData || !ohlcData.bars || ohlcData.bars.length < 10) {
+      return res.status(400).json({ error: `Could not fetch enough market data from Biquote for ${targetSymbol}.` });
+    }
+
     const candles = ohlcData.bars.reverse().map(b => ({
       open: b.open, high: b.high, low: b.low, close: b.close,
       volume: b.volume || 0, tickVolume: b.tickVolume || 1 
@@ -129,23 +162,16 @@ app.post('/api/signal', async (req, res) => {
     const n = prices.length;
     const cp = prices[n-1];
 
-    // 2. Simple Math
-    const recentHigh = Math.max(...prices.slice(-20));
-    const recentLow = Math.min(...prices.slice(-20));
-    const avgTickVol = candles.slice(-20, -1).reduce((a, c) => a + c.tickVolume, 0) / Math.max(1, (n - 1));
-    const volumeSpike = candles[n-1].tickVolume > avgTickVol * 1.8;
-
     // 3. Build Prompt (Hiding Strategies)
     const prompt = `
-      You are a professional quantitative trader. Analyze this market data for ${symbol} on the ${timeframe} timeframe.
+      You are a professional quantitative trader. Analyze this market data for ${targetSymbol} on the ${timeframe} timeframe.
       
       Current Price: ${cp}
-      Recent 20-period High: ${recentHigh}
-      Recent 20-period Low: ${recentLow}
-      Unusual Volume Spike Detected: ${volumeSpike ? 'YES' : 'NO'}
+      Recent 20-period High: ${Math.max(...prices.slice(-20))}
+      Recent 20-period Low: ${Math.min(...prices.slice(-20))}
       
       Based on this data, provide a BUY, SELL, or HOLD signal. Include a recommended Entry price, Stop-Loss, and Take-Profit.
-      Keep your explanation brief.
+      Keep your explanation brief and easy to read.
       
       CRITICAL INSTRUCTION: Do NOT mention technical indicator names like "Hurst", "RSI", "MACD", or "Z-Score". 
       Instead, describe the market conditions using plain English (e.g., "The market is strongly trending", "Momentum is shifting", "Price is overbought").
