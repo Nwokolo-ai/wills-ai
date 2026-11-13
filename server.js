@@ -7,10 +7,6 @@ const cors = require('cors');
 const cron = require('node-cron');
 const rateLimit = require('express-rate-limit');
 
-// Import Biquote for the Signal Generator
-const BiquoteModule = require('biquote');
-const Biquote = BiquoteModule.Biquote || BiquoteModule.default || BiquoteModule;
-
 const auth = require('./auth');
 const db = require('./db');
 const alerts = require('./alerts');
@@ -33,7 +29,6 @@ try {
     );
     console.log('[push] configured');
   } else {
-    console.warn('[push] VAPID keys missing');
     webpush = null;
   }
 } catch (e) { webpush = null; }
@@ -72,6 +67,24 @@ function formatDateLabel(iso) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  BIQUOTE CACHING HELPER (From your previous working code)
+// ═══════════════════════════════════════════════════════════
+const cache = new Map();
+const TTL = 30_000; // 30 seconds cache
+
+async function cachedFetch(url) {
+  const hit = cache.get(url);
+  if (hit && hit.expires > Date.now()) return hit.data;
+  
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Biquote Error: ${resp.status}`);
+  
+  const data = await resp.json();
+  cache.set(url, { data, expires: Date.now() + TTL });
+  return data;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  API ROUTES
 // ═══════════════════════════════════════════════════════════
 app.get('/api/config', (req, res) => res.json({
@@ -104,7 +117,7 @@ app.get('/api/news', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-//  SIGNAL AI ROUTE (BIQUOTE + MISTRAL)
+//  SIGNAL AI ROUTE (BIQUOTE CACHED + MISTRAL)
 // ═══════════════════════════════════════════════════════════
 app.post('/api/signal', async (req, res) => {
   try {
@@ -112,13 +125,13 @@ app.post('/api/signal', async (req, res) => {
     const mistralKey = process.env.MISTRAL_API_KEY;
 
     if (!mistralKey) {
-      return res.status(500).json({ error: 'Mistral API key missing on server. Please add MISTRAL_API_KEY to environment variables.' });
+      return res.status(500).json({ error: 'Mistral API key missing on server.' });
     }
     if (!timeframe) {
       return res.status(400).json({ error: 'Timeframe is required' });
     }
 
-    // 1. Determine what to analyze (from button or text)
+    // 1. Determine what to analyze
     let targetSymbol = symbol;
     if (!targetSymbol || targetSymbol === "GENERAL") {
       const lower = (text || "").toLowerCase();
@@ -129,7 +142,7 @@ app.post('/api/signal', async (req, res) => {
       else if (lower.includes('silver') || lower.includes('xag')) targetSymbol = 'XAGUSD';
     }
 
-    // 2. If it's just general chat (no trading symbol found), chat with Mistral directly
+    // 2. General chat (No symbol)
     if (!targetSymbol && text) {
       const chatRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
@@ -145,17 +158,18 @@ app.post('/api/signal', async (req, res) => {
       return res.json({ signal: chatData.choices[0].message.content });
     }
 
-    // If no text and no symbol, stop.
     if (!targetSymbol) {
       return res.json({ signal: "Please select a symbol (like Gold or EUR/USD) or ask a question." });
     }
 
-    // 3. Fetch data from Biquote for the specific symbol
-    const bq = new Biquote();
-    const ohlcData = await bq.ohlc(targetSymbol, { interval: timeframe, limit: 150 }).catch(() => null);
-    
+    // 3. Fetch using your Cached Fetch method
+    const url = `https://biquote.io/api/${targetSymbol}/ohlc?interval=${timeframe}&limit=150`;
+    const ohlcData = await cachedFetch(url).catch((e) => {
+      throw new Error(`Could not fetch market data for ${targetSymbol}: ${e.message}`);
+    });
+
     if (!ohlcData || !ohlcData.bars || ohlcData.bars.length < 10) {
-      return res.status(400).json({ error: `Could not fetch enough market data from Biquote for ${targetSymbol}.` });
+      return res.status(400).json({ error: `Not enough market data for ${targetSymbol}.` });
     }
 
     const candles = ohlcData.bars.reverse().map(b => ({
@@ -167,28 +181,21 @@ app.post('/api/signal', async (req, res) => {
     const n = prices.length;
     const cp = prices[n-1];
 
-    // 4. Build Prompt (Hiding Strategies)
+    // 4. Build Prompt
     const prompt = `
       You are a professional quantitative trader. Analyze this market data for ${targetSymbol} on the ${timeframe} timeframe.
-      
       Current Price: ${cp}
       Recent 20-period High: ${Math.max(...prices.slice(-20))}
       Recent 20-period Low: ${Math.min(...prices.slice(-20))}
       
-      Based on this data, provide a BUY, SELL, or HOLD signal. Include a recommended Entry price, Stop-Loss, and Take-Profit.
-      Keep your explanation brief and easy to read.
-      
-      CRITICAL INSTRUCTION: Do NOT mention technical indicator names like "Hurst", "RSI", "MACD", or "Z-Score". 
-      Instead, describe the market conditions using plain English (e.g., "The market is strongly trending", "Momentum is shifting", "Price is overbought").
+      Provide a BUY, SELL, or HOLD signal with Entry, Stop-Loss, and Take-Profit.
+      Keep it brief. Do NOT mention technical indicator names. Use plain English.
     `;
 
     // 5. Call Mistral
     const mistralRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${mistralKey}` 
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
       body: JSON.stringify({
         model: 'open-mistral-7b',
         messages: [{ role: 'user', content: prompt }],
@@ -208,7 +215,7 @@ app.post('/api/signal', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-//  AUTH ROUTES
+//  AUTH ROUTES & OTHER ENDPOINTS
 // ═══════════════════════════════════════════════════════════
 app.post('/api/auth/signup', authLimiter, async (req, res) => {
   try { res.json(await auth.signup(req.body || {})); } 
@@ -226,10 +233,8 @@ app.post('/api/auth/forgot', authLimiter, async (req, res) => {
 });
 
 app.post('/api/auth/reset-pin', authLimiter, async (req, res) => {
-  try {
-    const { accessToken, newPin } = req.body;
-    res.json(await auth.resetPinWithToken(accessToken, newPin));
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  try { res.json(await auth.resetPinWithToken(req.body.accessToken, req.body.newPin)); } 
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/auth/refresh', async (req, res) => {
@@ -253,9 +258,6 @@ app.put('/api/auth/profile', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════════
-//  TELEGRAM & PUSH
-// ═══════════════════════════════════════════════════════════
 app.post('/api/telegram/webhook', async (req, res) => {
   try {
     const msg = req.body?.message || req.body?.edited_message;
