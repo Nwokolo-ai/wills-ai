@@ -22,8 +22,12 @@ let resetToken = null;
 const $ = id => document.getElementById(id);
 
 const FLAGS = {
-  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', AUD: '🇦🇺', NZD: '🇳🇿', 
-  CAD: '🇨🇦', CHF: '🇨🇭', CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', ALL: '🌐',
+  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵',
+  AUD: '🇦🇺', NZD: '🇳🇿', CAD: '🇨🇦', CHF: '🇨🇭',
+  CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', 
+  RON: '🇷🇴', TRY: '🇹🇷', HUF: '🇭🇺', PLN: '🇵🇱',
+  HKD: '🇭🇰', BGN: '🇧🇬', CZK: '🇨🇿', INR: '🇮🇳', 
+  BRL: '🇧🇷', KZT: '🇰🇿', ALL: '🌐',
 };
 function flag(code) { return FLAGS[(code || '').toUpperCase()] || '🏳️'; }
 
