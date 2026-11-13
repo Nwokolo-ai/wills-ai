@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  app.js — Full Application
+//  app.js — Full Application (Calendar + News + Signal AI)
 // ═══════════════════════════════════════════════════════════
 
 let allEvents = [];
@@ -21,15 +21,13 @@ let resetToken = null;
 
 const $ = id => document.getElementById(id);
 
-// UPDATED: Added RUB and DIN
+// UPDATED: Added RUB, DIN, ZAR, ILS
 const FLAGS = {
-  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵',
-  AUD: '🇦🇺', NZD: '🇳🇿', CAD: '🇨🇦', CHF: '🇨🇭',
-  CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', 
-  RON: '🇷🇴', TRY: '🇹🇷', HUF: '🇭🇺', PLN: '🇵🇱',
-  HKD: '🇭🇰', BGN: '🇧🇬', CZK: '🇨🇿', INR: '🇮🇳', 
-  BRL: '🇧🇷', KZT: '🇰🇿', RUB: '🇷🇺', DIN: '🇷🇸', 
-  ZAR: '🇿🇦', ILS: '🇮🇱', ALL: '🌐',
+  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', AUD: '🇦🇺', NZD: '🇳🇿', 
+  CAD: '🇨🇦', CHF: '🇨🇭', CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', 
+  RON: '🇷🇴', TRY: '🇹🇷', HUF: '🇭🇺', PLN: '🇵🇱', HKD: '🇭🇰', 
+  BGN: '🇧🇬', CZK: '🇨🇿', INR: '🇮🇳', BRL: '🇧🇷', KZT: '🇰🇿', 
+  RUB: '🇷🇺', DIN: '🇷🇸', ZAR: '🇿🇦', ILS: '🇮🇱', ALL: '🌐',
 };
 function flag(code) { return FLAGS[(code || '').toUpperCase()] || '🏳️'; }
 
@@ -771,7 +769,6 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// Check if they dismissed it recently (3 days)
 function canShowPwaBanner() {
   const dismissed = localStorage.getItem('pwa_dismissed_at');
   if (!dismissed) return true;
@@ -779,13 +776,11 @@ function canShowPwaBanner() {
   return daysSince > 3; 
 }
 
-// Show banner function with delay
 function triggerPwaBanner() {
   if (!canShowPwaBanner()) return;
-  if (window.navigator.standalone === true) return; // Already installed
+  if (window.navigator.standalone === true) return;
   if (document.getElementById('pwaBanner').classList.contains('show')) return;
 
-  // Wait 30 seconds before showing so we don't annoy them immediately
   setTimeout(() => {
     if (canShowPwaBanner() && !window.navigator.standalone) {
       document.getElementById('pwaBanner')?.classList.add('show');
@@ -796,10 +791,9 @@ function triggerPwaBanner() {
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
-  triggerPwaBanner(); // Trigger the smart popup
+  triggerPwaBanner();
 });
 
-// Handle iOS (Safari doesn't support beforeinstallprompt)
 if (window.navigator.standalone !== true) {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   if (isIOS && canShowPwaBanner()) {
@@ -812,7 +806,7 @@ if (window.navigator.standalone !== true) {
         });
         banner.classList.add('show');
       }
-    }, 30000); // Wait 30s
+    }, 30000);
   }
 }
 
@@ -825,91 +819,42 @@ $('pwaInstall')?.addEventListener('click', async () => {
 });
 
 $('pwaDismiss')?.addEventListener('click', () => {
-  // Snooze for 3 days
   localStorage.setItem('pwa_dismissed_at', String(Date.now()));
   $('pwaBanner')?.classList.remove('show');
 });
 
-// Init
-(async function init() {
-  checkUrlForResetToken();
-  if (Auth.isLoggedIn) await Auth.ensureFresh();
-  $('tzToggle').textContent = `🌍 ${getTimezoneFullLabel()}`;
-  renderAuthArea();
-  await refreshAll();
-  setInterval(refreshAll, 60000);
-  setInterval(updateLastUpdated, 30000);
-})();
-// ── SIGNAL GENERATOR LOGIC ──
-const signalBtn = $('generateSignalBtn');
-const signalResult = $('signalResult');
-
-if (signalBtn) {
-  signalBtn.addEventListener('click', async () => {
-    const symbol = $('signalSymbol').value;
-    const timeframe = $('signalTF').value;
-
-    signalBtn.disabled = true;
-    signalBtn.textContent = 'Analyzing Market...';
-    signalResult.classList.remove('show');
-
-    try {
-      const res = await fetch('/api/signal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol, timeframe })
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      signalResult.innerHTML = `<strong>${symbol} (${timeframe.toUpperCase()})</strong><br><br>${data.signal.replace(/\n/g, '<br>')}`;
-      signalResult.classList.add('show');
-      
-    } catch (err) {
-      alert('Error: ' + err.message);
-    } finally {
-      signalBtn.disabled = false;
-      signalBtn.textContent = 'Generate Signal';
-    }
-  });
-}
-// ── SIGNAL GENERATOR LOGIC ──
+// ═══════════════════════════════════════════════════════════
+// SIGNAL AI LOGIC (Chat & Quick Buttons)
+// ═══════════════════════════════════════════════════════════
 const signalInput = $('signalInput');
 const signalSendBtn = $('signalSendBtn');
 const signalChatMessages = $('signalChatMessages');
 const signalTyping = $('signalTyping');
 const orbArea = $('orbArea');
 
-// Handle sending a message
 async function handleSignalRequest(symbol, customText = null) {
   if (signalSendBtn.disabled) return;
   
   const tf = $('signalTF').value;
   let userText = customText || signalInput.value.trim();
-  let displaySymbol = symbol || "Market";
-
+  
   if (!userText && !symbol) return;
 
-  // If a symbol is passed from a quick button, format the text
   if (symbol && !customText) {
     userText = `Analyze ${symbol}`;
   }
 
-  // Add user message to chat
+  // Add user message
   const userMsg = document.createElement('div');
   userMsg.className = 'msg user';
   userMsg.textContent = userText;
   signalChatMessages.appendChild(userMsg);
   
-  // Clear input and scroll down
   signalInput.value = '';
   signalChatMessages.scrollTop = signalChatMessages.scrollHeight;
 
-  // UI: Shrink the orb to make room for chat
+  // UI: Shrink orb & show typing
   orbArea.classList.add('shrink');
-  
-  // Show typing indicator
   signalTyping.classList.add('show');
   signalChatMessages.scrollTop = signalChatMessages.scrollHeight;
   signalSendBtn.disabled = true;
@@ -924,14 +869,11 @@ async function handleSignalRequest(symbol, customText = null) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
 
-    // Hide typing
     signalTyping.classList.remove('show');
 
-    // Add AI response
     const botMsg = document.createElement('div');
     botMsg.className = 'msg bot';
     
-    // Format the AI response (bold, buy/sell colors)
     let formatted = data.signal
       .replace(/\n/g, '<br>')
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -954,27 +896,36 @@ async function handleSignalRequest(symbol, customText = null) {
   }
 }
 
-// Quick Symbol Buttons
-document.querySelectorAll('.quick-symbols button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    handleSignalRequest(btn.dataset.sym);
+if (document.querySelectorAll('.quick-symbols button').length > 0) {
+  document.querySelectorAll('.quick-symbols button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      handleSignalRequest(btn.dataset.sym);
+    });
   });
-});
 
-// Send Button
-signalSendBtn.addEventListener('click', () => {
-  handleSignalRequest(null);
-});
-
-// Enter key to send
-signalInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
+  signalSendBtn.addEventListener('click', () => {
     handleSignalRequest(null);
-  }
-});
+  });
 
-// Back button to return to Calendar
-$('signalBackBtn').addEventListener('click', () => {
-  document.querySelector('.tab-btn[data-tab="calendar"]').click();
-});
+  signalInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSignalRequest(null);
+    }
+  });
+
+  $('signalBackBtn').addEventListener('click', () => {
+    document.querySelector('.tab-btn[data-tab="calendar"]').click();
+  });
+}
+
+// Init
+(async function init() {
+  checkUrlForResetToken();
+  if (Auth.isLoggedIn) await Auth.ensureFresh();
+  $('tzToggle').textContent = `🌍 ${getTimezoneFullLabel()}`;
+  renderAuthArea();
+  await refreshAll();
+  setInterval(refreshAll, 60000);
+  setInterval(updateLastUpdated, 30000);
+})();
