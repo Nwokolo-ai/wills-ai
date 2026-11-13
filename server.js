@@ -7,6 +7,10 @@ const cors = require('cors');
 const cron = require('node-cron');
 const rateLimit = require('express-rate-limit');
 
+// Import Biquote for the Signal Generator
+const BiquoteModule = require('biquote');
+const Biquote = BiquoteModule.Biquote || BiquoteModule.default || BiquoteModule;
+
 const auth = require('./auth');
 const db = require('./db');
 const alerts = require('./alerts');
@@ -17,6 +21,7 @@ const PORT = process.env.PORT || 3500;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
 
+// ── Web Push setup ──
 let webpush = null;
 try {
   webpush = require('web-push');
@@ -61,6 +66,9 @@ function formatDateLabel(iso) {
   } catch { return iso; }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  API ROUTES
+// ═══════════════════════════════════════════════════════════
 app.get('/api/config', (req, res) => res.json({
   supabaseUrl: db.SUPABASE_URL, supabasePublishableKey: db.PUBLISHABLE, vapidPublicKey: process.env.VAPID_PUBLIC_KEY || null,
 }));
@@ -90,6 +98,87 @@ app.get('/api/news', (req, res) => {
   catch (err) { res.json({ items: [] }); }
 });
 
+// ═══════════════════════════════════════════════════════════
+//  SIGNAL AI ROUTE (BIQUOTE + MISTRAL)
+// ═══════════════════════════════════════════════════════════
+app.post('/api/signal', async (req, res) => {
+  try {
+    const { symbol, timeframe } = req.body;
+    const mistralKey = process.env.MISTRAL_API_KEY;
+
+    if (!mistralKey) return res.status(500).json({ error: 'Mistral API key missing on server. Please add MISTRAL_API_KEY to .env.local' });
+    if (!symbol || !timeframe) return res.status(400).json({ error: 'Symbol and timeframe required' });
+
+    // 1. Fetch data from Biquote
+    const bq = new Biquote();
+    
+    // Biquote uses string symbols usually like "BTCUSD" or "EURUSD"
+    const ohlcData = await bq.ohlc(symbol, { interval: timeframe, limit: 150 }).catch(() => null);
+    
+    if (!ohlcData || !ohlcData.bars || ohlcData.bars.length < 10) {
+      return res.status(400).json({ error: 'Could not fetch enough market data from Biquote for this symbol.' });
+    }
+
+    // Reverse to chronological order (oldest to newest)
+    const candles = ohlcData.bars.reverse().map(b => ({
+      open: b.open, high: b.high, low: b.low, close: b.close,
+      volume: b.volume || 0, tickVolume: b.tickVolume || 1 
+    }));
+
+    const prices = candles.map(c => c.close);
+    const n = prices.length;
+    const cp = prices[n-1];
+
+    // 2. Simple Math
+    const recentHigh = Math.max(...prices.slice(-20));
+    const recentLow = Math.min(...prices.slice(-20));
+    const avgTickVol = candles.slice(-20, -1).reduce((a, c) => a + c.tickVolume, 0) / Math.max(1, (n - 1));
+    const volumeSpike = candles[n-1].tickVolume > avgTickVol * 1.8;
+
+    // 3. Build Prompt (Hiding Strategies)
+    const prompt = `
+      You are a professional quantitative trader. Analyze this market data for ${symbol} on the ${timeframe} timeframe.
+      
+      Current Price: ${cp}
+      Recent 20-period High: ${recentHigh}
+      Recent 20-period Low: ${recentLow}
+      Unusual Volume Spike Detected: ${volumeSpike ? 'YES' : 'NO'}
+      
+      Based on this data, provide a BUY, SELL, or HOLD signal. Include a recommended Entry price, Stop-Loss, and Take-Profit.
+      Keep your explanation brief.
+      
+      CRITICAL INSTRUCTION: Do NOT mention technical indicator names like "Hurst", "RSI", "MACD", or "Z-Score". 
+      Instead, describe the market conditions using plain English (e.g., "The market is strongly trending", "Momentum is shifting", "Price is overbought").
+    `;
+
+    // 4. Call Mistral
+    const mistralRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        'Authorization': `Bearer ${mistralKey}` 
+      },
+      body: JSON.stringify({
+        model: 'open-mistral-7b',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.5
+      })
+    });
+
+    const mistralData = await mistralRes.json();
+    if (!mistralRes.ok) throw new Error(mistralData.error?.message || 'Mistral API Error');
+    
+    res.json({ signal: mistralData.choices[0].message.content });
+
+  } catch (err) {
+    console.error('[signal]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  AUTH ROUTES
+// ═══════════════════════════════════════════════════════════
 app.post('/api/auth/signup', authLimiter, async (req, res) => {
   try { res.json(await auth.signup(req.body || {})); } 
   catch (err) { res.status(400).json({ error: err.message }); }
@@ -133,6 +222,9 @@ app.put('/api/auth/profile', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════
+//  TELEGRAM & PUSH
+// ═══════════════════════════════════════════════════════════
 app.post('/api/telegram/webhook', async (req, res) => {
   try {
     const msg = req.body?.message || req.body?.edited_message;
@@ -172,6 +264,9 @@ app.get('/api/push/test', async (req, res) => {
   res.json(result);
 });
 
+// ═══════════════════════════════════════════════════════════
+//  CRON JOBS
+// ═══════════════════════════════════════════════════════════
 cron.schedule('0 4 * * *', async () => { try { await require('./ffScraper').scrape(); } catch (e) {} });
 cron.schedule('*/30 * * * *', async () => { try { await require('./newsScraper').fetchAll(); } catch (e) {} });
 cron.schedule('* * * * *', () => { alerts.runAll().catch(e => console.error('[cron] alerts:', e.message)); });
@@ -185,6 +280,7 @@ setTimeout(async () => {
   try { await require('./newsScraper').fetchAll(); } catch (e) {}
 }, 5000);
 
+// SPA Catch-All
 app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 app.listen(PORT, '0.0.0.0', () => {
