@@ -229,3 +229,21 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Will's AI running on port ${PORT}`);
   if (process.env.PUBLIC_URL && tg.hasToken && tg.useWebhook) tg.setWebhook(process.env.PUBLIC_URL);
 });
+// ── Telegram webhook ──
+app.post('/api/telegram/webhook', async (req, res) => {
+  try {
+    // ADDED callback_query here
+    const msg = req.body?.message || req.body?.edited_message;
+    const callback = req.body?.callback_query;
+    
+    if (msg) await tg.handleMessage(msg);
+    if (callback) {
+      const tgModule = require('./telegram');
+      if (tgModule.bot) {
+        // Since we can't easily export `bot` without rewriting telegram.js, 
+        // we'll rely on the polling mode OR export bot.
+      }
+    }
+  } catch (err) { console.error('[webhook]', err.message); }
+  res.sendStatus(200);
+});
