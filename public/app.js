@@ -27,7 +27,8 @@ const FLAGS = {
   CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', 
   RON: '🇷🇴', TRY: '🇹🇷', HUF: '🇭🇺', PLN: '🇵🇱',
   HKD: '🇭🇰', BGN: '🇧🇬', CZK: '🇨🇿', INR: '🇮🇳', 
-  BRL: '🇧🇷', KZT: '🇰🇿', ALL: '🌐',
+  BRL: '🇧🇷', KZT: '🇰🇿', RUB: '🇷🇺', DIN: '🇷🇸', 
+  ALL: '🌐',
 };
 function flag(code) { return FLAGS[(code || '').toUpperCase()] || '🏳️'; }
 
