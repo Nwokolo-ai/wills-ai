@@ -283,3 +283,11 @@ tbody tr.day td .today {
 .empty { padding: 40px; text-align: center; color: var(--text-dim); font-style: italic; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+/* Adsterra Social Bar Spacing */
+body {
+  padding-bottom: 70px; /* Prevents the social bar from covering inputs */
+}
+
+.signal-wrapper {
+  height: calc(100vh - 180px); /* Adjusts chat height for the ad */
+}
