@@ -14,6 +14,9 @@
 </head>
 <body data-theme="dark">
 
+<!-- Hidden Audio for Alerts -->
+<audio id="alertSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
+
 <!-- PWA Install Banner -->
 <div class="pwa-banner" id="pwaBanner">
   <div class="pwa-inner">
@@ -52,7 +55,7 @@
     <span>Ad space · available</span>
   </div>
 
-  <div class="day-filter">
+  <div class="day-filter" style="padding-bottom: 0;">
     <button class="day-btn active" data-day="today">Today</button>
     <button class="day-btn" data-day="tomorrow">Tomorrow</button>
     <button class="day-btn" data-day="week">This Week</button>
@@ -61,7 +64,11 @@
     <button class="day-btn tz-btn" id="tzToggle">🌍 Loading…</button>
   </div>
 
-  <div class="currency-filter" id="currencyFilter">
+  <div style="padding: 8px 16px; background: var(--bg); position: sticky; top: 140px; z-index: 90;">
+    <input type="text" id="calendarSearch" placeholder="Search events (e.g. CPI, NFP)..." style="width: 100%; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px;" />
+  </div>
+
+  <div class="currency-filter" id="currencyFilter" style="top: 190px;">
     <button class="cur-btn active" data-cur="all">All</button>
     <button class="cur-btn" data-cur="USD">🇺🇸 USD</button>
     <button class="cur-btn" data-cur="EUR">🇪🇺 EUR</button>
@@ -74,7 +81,7 @@
     <button class="cur-btn" data-cur="CNY">🇨🇳 CNY</button>
   </div>
 
-  <div class="stats">
+  <div class="stats" style="top: 240px;">
     <div class="stat"><div class="lbl">Total</div><div class="val" id="statTotal">—</div></div>
     <div class="stat"><div class="lbl">High</div><div class="val high" id="statHigh">—</div></div>
     <div class="stat"><div class="lbl">Medium</div><div class="val medium" id="statMedium">—</div></div>
@@ -130,9 +137,26 @@
       </label>
       <div class="auth-error" id="loginError"></div>
       <button type="submit" class="auth-submit" id="loginSubmit">Log in</button>
-      <div class="auth-links">
-        <span>New here?</span>
+      <div class="auth-links" style="justify-content: space-between;">
+        <button type="button" class="auth-link" id="toForgot">Forgot PIN?</button>
         <button type="button" class="auth-link" id="toSignup">Create an account →</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- NEW: Forgot Password View -->
+  <div class="auth-view" id="viewForgot">
+    <h2>Reset your PIN</h2>
+    <p class="auth-sub">Enter your username and we'll send a reset link to the email on file.</p>
+    <form id="formForgot" class="auth-form">
+      <label>Username <span class="req">required</span>
+        <input type="text" id="forgotUsername" placeholder="Your username" autocomplete="username" required />
+      </label>
+      <div class="auth-error" id="forgotError"></div>
+      <div class="auth-error" id="forgotSuccess" style="color: var(--accent); background: rgba(0,245,160,.1); border-left-color: var(--accent);"></div>
+      <button type="submit" class="auth-submit" id="forgotSubmit">Send Reset Link</button>
+      <div class="auth-links">
+        <button type="button" class="auth-link" id="backToLogin">← Back to login</button>
       </div>
     </form>
   </div>
@@ -149,9 +173,8 @@
         <input type="password" id="signupPin" placeholder="At least 6 digits" inputmode="numeric" pattern="\d*" minlength="6" maxlength="12" autocomplete="new-password" required />
         <small>Digits only. Avoid patterns like 123456.</small>
       </label>
-      <label>Email <span class="opt">optional — for alerts</span>
-        <input type="email" id="signupEmail" placeholder="you@example.com" autocomplete="email" />
-        <small>Check your Spam folder if you don't see the welcome email.</small>
+      <label>Email <span class="req">required for alerts & reset</span>
+        <input type="email" id="signupEmail" placeholder="you@example.com" autocomplete="email" required />
       </label>
       <div class="auth-error" id="signupError"></div>
       <button type="submit" class="auth-submit" id="signupSubmit">Create account</button>
