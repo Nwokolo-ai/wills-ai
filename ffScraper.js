@@ -6,6 +6,11 @@ const MODE = process.env.MODE || 'scrape';
 let nextTimer = null;
 let retryTimers = [];
 let previousActuals = new Map();
+let previousActualsSeeded = false;
+
+// ═══════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════
 
 function parseNumber(v) {
   if (v == null || v === '') return null;
@@ -48,29 +53,38 @@ function toTimeString(isoTime) {
   }).toLowerCase().replace(/\s+/g, '');
 }
 
-function makeKey(isoTime, currency, name) {
-  const t = (isoTime || '').toLowerCase();
+// ── FIX #3: include date in key so all-day events don't collide ──
+function makeKey(isoTime, currency, name, dateStr) {
+  const t = (isoTime || dateStr || 'allday').toLowerCase();
   const c = (currency || '').toLowerCase();
   const n = (name || '').toLowerCase().replace(/\s+/g, ' ').trim();
   return `${t}|${c}|${n}`;
+}
+
+// ── FIX #1: coerce empty-string actuals to null ──
+function cleanField(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
 }
 
 function toDbRow(e) {
   const isoTime = e.time || null;
   const name = (e.name || '').trim();
   const currency = (e.currency || '').toUpperCase().trim();
+  const dateStr = toIsoDate(isoTime) || new Date().toISOString().slice(0, 10);
   return {
-    event_key: makeKey(isoTime, currency, name),
-    event_date: toIsoDate(isoTime),
+    event_key: makeKey(isoTime, currency, name, dateStr),
+    event_date: dateStr,
     event_time: toTimeString(isoTime),
     event_timestamp: isoTime,
     currency,
     impact: normalizeImpact(e.importance),
     title: name,
-    actual: e.actual != null ? String(e.actual) : null,
-    forecast: e.forecast != null ? String(e.forecast) : null,
-    previous: e.previous != null ? String(e.previous) : null,
-    beat_miss: beatMiss(e.actual, e.forecast),
+    actual: cleanField(e.actual),
+    forecast: cleanField(e.forecast),
+    previous: cleanField(e.previous),
+    beat_miss: beatMiss(cleanField(e.actual), cleanField(e.forecast)),
     source: e.source || 'biquote',
     updated_at: new Date().toISOString(),
   };
@@ -100,6 +114,10 @@ async function pushToSupabase(rows) {
   return total;
 }
 
+// ═══════════════════════════════════════════════════════════
+//  FETCH
+// ═══════════════════════════════════════════════════════════
+
 async function fetchBiquote() {
   const bq = new Biquote();
   const now = new Date();
@@ -112,14 +130,44 @@ async function fetchBiquote() {
   return events.map(toDbRow);
 }
 
+// ═══════════════════════════════════════════════════════════
+//  NEW-ACTUAL DETECTION
+// ═══════════════════════════════════════════════════════════
+
+// ── FIX #2: seed previousActuals from DB on first run ──
+async function seedPreviousActuals() {
+  if (previousActualsSeeded) return;
+  previousActualsSeeded = true;
+  try {
+    const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const { data, error } = await admin.from('calendar_events')
+      .select('event_key, actual')
+      .not('actual', 'is', null)
+      .gte('event_date', cutoff);
+    if (error) throw error;
+    for (const row of data || []) {
+      if (row.actual) previousActuals.set(row.event_key, row.actual);
+    }
+    console.log(`[ff] seeded ${previousActuals.size} previous actuals`);
+  } catch (e) {
+    console.error('[ff] seed failed:', e.message);
+    // Allow retry on next scrape
+    previousActualsSeeded = false;
+  }
+}
+
 function detectNewActuals(rows) {
   const fresh = [];
   for (const row of rows) {
     const previous = previousActuals.get(row.event_key);
     if (row.actual && !previous) fresh.push(row);
-    else if (row.actual && previous && row.actual !== previous) fresh.push({ ...row, revised: true });
+    else if (row.actual && previous && row.actual !== previous) {
+      fresh.push({ ...row, revised: true });
+    }
   }
-  for (const row of rows) if (row.actual) previousActuals.set(row.event_key, row.actual);
+  for (const row of rows) {
+    if (row.actual) previousActuals.set(row.event_key, row.actual);
+  }
   return fresh;
 }
 
@@ -129,15 +177,29 @@ async function notifyActuals(newActuals) {
   try {
     const { notifyNewActuals } = require('./alerts');
     if (notifyNewActuals) await notifyNewActuals(newActuals);
-  } catch (e) { console.error('[ff] notify failed:', e.message); }
+  } catch (e) {
+    console.error('[ff] notify failed:', e.message);
+  }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  SCRAPE — main entry
+// ═══════════════════════════════════════════════════════════
+
 async function scrape() {
-  if (MODE === 'read') { console.log('[ff] MODE=read — skip'); return; }
+  if (MODE === 'read') {
+    console.log('[ff] MODE=read — skip');
+    return;
+  }
   const t0 = Date.now();
   try {
+    await seedPreviousActuals();
+
     const allRows = await fetchBiquote();
-    if (!allRows.length) { scheduleNextEventRefresh(); return; }
+    if (!allRows.length) {
+      scheduleNextEventRefresh();
+      return;
+    }
 
     const deduped = [...new Map(allRows.map(r => [r.event_key, r])).values()];
     const valid = validateRows(deduped);
@@ -158,9 +220,15 @@ async function scrape() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  TARGETED REFRESH — after event fires
+// ═══════════════════════════════════════════════════════════
+
 async function targetedRefresh() {
   if (MODE === 'read') return false;
   try {
+    await seedPreviousActuals();
+
     const allRows = await fetchBiquote();
     const deduped = [...new Map(allRows.map(r => [r.event_key, r])).values()];
     const valid = validateRows(deduped);
@@ -176,6 +244,10 @@ async function targetedRefresh() {
     return false;
   }
 }
+
+// ═══════════════════════════════════════════════════════════
+//  RETRY LOOP — poll after event fires until actual appears
+// ═══════════════════════════════════════════════════════════
 
 async function fireRetriesForNextEvent() {
   retryTimers.forEach(t => clearTimeout(t));
@@ -193,7 +265,10 @@ async function fireRetriesForNextEvent() {
     .order('event_timestamp', { ascending: true })
     .limit(1);
 
-  if (!data?.length) { console.log('[ff] no due events for retry'); return; }
+  if (!data?.length) {
+    console.log('[ff] no due events for retry');
+    return;
+  }
 
   const target = data[0];
   console.log(`[ff] retry loop for ${target.currency} ${target.title}`);
@@ -212,6 +287,10 @@ async function fireRetriesForNextEvent() {
     retryTimers.push(timer);
   });
 }
+
+// ═══════════════════════════════════════════════════════════
+//  SCHEDULER — set next scrape based on next upcoming event
+// ═══════════════════════════════════════════════════════════
 
 async function scheduleNextEventRefresh() {
   if (nextTimer) clearTimeout(nextTimer);
@@ -236,7 +315,10 @@ async function scheduleNextEventRefresh() {
     const targetMs = new Date(next.event_timestamp).getTime() + 1000;
     const delay = targetMs - Date.now();
 
-    if (delay < 0) { await fireRetriesForNextEvent(); return; }
+    if (delay < 0) {
+      await fireRetriesForNextEvent();
+      return;
+    }
 
     const capped = Math.min(delay, 6 * 3600 * 1000);
     const minUntil = Math.round(capped / 60000);
@@ -246,13 +328,38 @@ async function scheduleNextEventRefresh() {
       console.log('[ff] EVENT FIRED — starting retry loop');
       await fireRetriesForNextEvent();
     }, capped);
-  } catch (err) { console.error('[ff] schedule error:', err.message); }
+  } catch (err) {
+    console.error('[ff] schedule error:', err.message);
+  }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  CLEANUP — removes old DB rows + prunes memory map
+// ═══════════════════════════════════════════════════════════
+
+// ── FIX #4: prune previousActuals alongside DB rows ──
 async function cleanup() {
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
   await admin.from('calendar_events').delete().lt('event_date', cutoff);
-  console.log('[ff] cleanup done');
+  console.log('[ff] db cleanup done');
+
+  try {
+    const { data: live } = await admin.from('calendar_events')
+      .select('event_key')
+      .gte('event_date', cutoff);
+    const liveKeys = new Set((live || []).map(r => r.event_key));
+    let pruned = 0;
+    for (const k of previousActuals.keys()) {
+      if (!liveKeys.has(k)) {
+        previousActuals.delete(k);
+        pruned++;
+      }
+    }
+    if (pruned > 0) console.log(`[ff] pruned ${pruned} stale keys from memory`);
+  } catch (e) {
+    console.error('[ff] memory prune failed:', e.message);
+  }
 }
 
 module.exports = { scrape, cleanup, scheduleNextEventRefresh };
