@@ -21,14 +21,13 @@ let resetToken = null;
 
 const $ = id => document.getElementById(id);
 
+// UPDATED: Added RUB and DIN
 const FLAGS = {
-  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵',
-  AUD: '🇦🇺', NZD: '🇳🇿', CAD: '🇨🇦', CHF: '🇨🇭',
-  CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', 
-  RON: '🇷🇴', TRY: '🇹🇷', HUF: '🇭🇺', PLN: '🇵🇱',
-  HKD: '🇭🇰', BGN: '🇧🇬', CZK: '🇨🇿', INR: '🇮🇳', 
-  BRL: '🇧🇷', KZT: '🇰🇿', RUB: '🇷🇺', DIN: '🇷🇸', 
-  ALL: '🌐',
+  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', AUD: '🇦🇺', NZD: '🇳🇿', 
+  CAD: '🇨🇦', CHF: '🇨🇭', CNY: '🇨🇳', KRW: '🇰🇷', MYR: '🇲🇾', 
+  RON: '🇷🇴', TRY: '🇹🇷', HUF: '🇭🇺', PLN: '🇵🇱', HKD: '🇭🇰', 
+  BGN: '🇧🇬', CZK: '🇨🇿', INR: '🇮🇳', BRL: '🇧🇷', KZT: '🇰🇿', 
+  RUB: '🇷🇺', DIN: '🇷🇸', ALL: '🌐',
 };
 function flag(code) { return FLAGS[(code || '').toUpperCase()] || '🏳️'; }
 
@@ -758,7 +757,9 @@ async function renderPrefs() {
   });
 }
 
-// PWA Logic
+// ═══════════════════════════════════════════════════════════
+// PWA INSTALL LOGIC (SMART POPUP)
+// ═══════════════════════════════════════════════════════════
 let deferredPrompt = null;
 let swRegistration = null;
 
@@ -768,30 +769,48 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Check if they dismissed it recently (3 days)
+function canShowPwaBanner() {
+  const dismissed = localStorage.getItem('pwa_dismissed_at');
+  if (!dismissed) return true;
+  const daysSince = (Date.now() - parseInt(dismissed)) / (1000 * 60 * 60 * 24);
+  return daysSince > 3; 
+}
+
+// Show banner function with delay
+function triggerPwaBanner() {
+  if (!canShowPwaBanner()) return;
+  if (window.navigator.standalone === true) return; // Already installed
+  if (document.getElementById('pwaBanner').classList.contains('show')) return;
+
+  // Wait 30 seconds before showing so we don't annoy them immediately
+  setTimeout(() => {
+    if (canShowPwaBanner() && !window.navigator.standalone) {
+      document.getElementById('pwaBanner')?.classList.add('show');
+    }
+  }, 30000);
+}
+
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
-  const dismissed = localStorage.getItem('pwa_dismissed_at');
-  if (dismissed && (Date.now() - parseInt(dismissed) < 7 * 24 * 3600 * 1000)) return;
-  setTimeout(() => { if (deferredPrompt) $('pwaBanner')?.classList.add('show'); }, 15000);
+  triggerPwaBanner(); // Trigger the smart popup
 });
 
+// Handle iOS (Safari doesn't support beforeinstallprompt)
 if (window.navigator.standalone !== true) {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  if (isIOS) {
-    const dismissed = localStorage.getItem('pwa_dismissed_at');
-    if (!dismissed || (Date.now() - parseInt(dismissed) > 7 * 24 * 3600 * 1000)) {
-      setTimeout(() => {
-        const banner = $('pwaBanner');
-        if (banner) {
-          banner.querySelector('.pwa-install').textContent = 'How to install';
-          banner.querySelector('.pwa-install').addEventListener('click', () => {
-            alert("To install on iPhone:\n1. Tap the 'Share' button at the bottom of Safari.\n2. Scroll down and tap 'Add to Home Screen'.");
-          });
-          banner.classList.add('show');
-        }
-      }, 15000);
-    }
+  if (isIOS && canShowPwaBanner()) {
+    setTimeout(() => {
+      const banner = $('pwaBanner');
+      if (banner) {
+        banner.querySelector('.pwa-install').textContent = 'How to install';
+        banner.querySelector('.pwa-install').addEventListener('click', () => {
+          alert("To install on iPhone:\n1. Tap the 'Share' button at the bottom of Safari.\n2. Scroll down and tap 'Add to Home Screen'.");
+        });
+        banner.classList.add('show');
+      }
+    }, 30000); // Wait 30s
   }
 }
 
@@ -804,10 +823,12 @@ $('pwaInstall')?.addEventListener('click', async () => {
 });
 
 $('pwaDismiss')?.addEventListener('click', () => {
+  // Snooze for 3 days
   localStorage.setItem('pwa_dismissed_at', String(Date.now()));
   $('pwaBanner')?.classList.remove('show');
 });
 
+// Init
 (async function init() {
   checkUrlForResetToken();
   if (Auth.isLoggedIn) await Auth.ensureFresh();
