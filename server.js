@@ -1,4 +1,3 @@
-// Clean deploy).
 require('dotenv').config({ path: './.env.local' });
 const express = require('express');
 const fs = require('fs');
@@ -21,40 +20,27 @@ const DATA_DIR = path.join(__dirname, 'data');
 let webpush = null;
 try {
   webpush = require('web-push');
-  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@wills-ai.local', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
-  }
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@wills-ai.local', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
 } catch (e) {}
 
 app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '100kb' }));
+app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeaders: (res, fp) => { if (fp.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); } }));
 
-app.use(express.static(PUBLIC_DIR, {
-  etag: false, lastModified: false,
-  setHeaders: (res, fp) => { if (fp.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); },
-}));
-
-const cache = new Map();
-const TTL = 30_000; 
+const cache = new Map(), TTL = 30_000; 
 async function cachedFetch(url) {
-  const hit = cache.get(url);
-  if (hit && hit.expires > Date.now()) return hit.data;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Biquote Error: ${resp.status}`);
-  const data = await resp.json();
-  cache.set(url, { data, expires: Date.now() + TTL });
-  return data;
+  const hit = cache.get(url); if (hit && hit.expires > Date.now()) return hit.data;
+  const resp = await fetch(url); if (!resp.ok) throw new Error(`Biquote Error: ${resp.status}`);
+  const data = await resp.json(); cache.set(url, { data, expires: Date.now() + TTL }); return data;
 }
 
-// API Routes
 app.get('/api/calendar', async (req, res) => {
   try {
-    const now = new Date();
-    const from = new Date(now); from.setDate(from.getDate() - 1);
+    const now = new Date(), from = new Date(now); from.setDate(from.getDate() - 1);
     const to = new Date(now); to.setDate(to.getDate() + 14);
-    const { data, error } = await db.admin.from('calendar_events')
-      .select('*').gte('event_date', from.toISOString().slice(0, 10)).lte('event_date', to.toISOString().slice(0, 10))
+    const { data, error } = await db.admin.from('calendar_events').select('*')
+      .gte('event_date', from.toISOString().slice(0, 10)).lte('event_date', to.toISOString().slice(0, 10))
       .order('event_timestamp', { ascending: true, nullsFirst: false });
     if (error) throw error;
     const events = (data || []).map(e => ({
@@ -79,8 +65,7 @@ app.post('/api/signal', async (req, res) => {
     let contextStr = "";
     if (contextMode === 'events' || contextMode === 'both') {
       const today = new Date().toISOString().slice(0, 10);
-      const { data: events } = await db.admin.from('calendar_events')
-        .select('currency, title, impact, actual, forecast').eq('event_date', today).in('impact', ['high', 'medium']).limit(5);
+      const { data: events } = await db.admin.from('calendar_events').select('currency, title, impact, actual, forecast').eq('event_date', today).in('impact', ['high', 'medium']).limit(5);
       if (events && events.length > 0) {
         contextStr += "ECONOMIC EVENTS TODAY:\n";
         events.forEach(e => { contextStr += `- ${e.currency} ${e.title} (${e.impact}): F ${e.forecast || 'N/A'}, A ${e.actual || 'Pending'}\n`; });
@@ -90,10 +75,7 @@ app.post('/api/signal', async (req, res) => {
       try {
         const newsData = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'investing_news.json'), 'utf8'));
         const latestNews = (newsData.items || []).slice(0, 3);
-        if (latestNews.length > 0) {
-          contextStr += "\nLATEST NEWS:\n";
-          latestNews.forEach(n => { contextStr += `- ${n.title}\n`; });
-        }
+        if (latestNews.length > 0) { contextStr += "\nLATEST NEWS:\n"; latestNews.forEach(n => { contextStr += `- ${n.title}\n`; }); }
       } catch (e) {}
     }
 
@@ -136,45 +118,33 @@ app.post('/api/signal', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Auth & Webhook Routes
-app.post('/api/auth/signup', async (req, res) => { try { res.json(await auth.signup(req.body)); } catch (err) { res.status(400).json({ error: err.message }); } });
-app.post('/api/auth/login', async (req, res) => { try { res.json({ session: await auth.login(req.body) }); } catch (err) { res.status(401).json({ error: err.message }); } });
-app.post('/api/auth/forgot', async (req, res) => { try { res.json(await auth.forgotPin(req.body.username)); } catch (err) { res.status(400).json({ error: err.message }); } });
-app.post('/api/auth/reset-pin', async (req, res) => { try { res.json(await auth.resetPinWithToken(req.body.accessToken, req.body.newPin)); } catch (err) { res.status(400).json({ error: err.message }); } });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
+app.post('/api/auth/signup', authLimiter, async (req, res) => { try { res.json(await auth.signup(req.body)); } catch (err) { res.status(400).json({ error: err.message }); } });
+app.post('/api/auth/login', authLimiter, async (req, res) => { try { res.json({ session: await auth.login(req.body) }); } catch (err) { res.status(401).json({ error: err.message }); } });
+app.post('/api/auth/forgot', authLimiter, async (req, res) => { try { res.json(await auth.forgotPin(req.body.username)); } catch (err) { res.status(400).json({ error: err.message }); } });
+app.post('/api/auth/reset-pin', authLimiter, async (req, res) => { try { res.json(await auth.resetPinWithToken(req.body.accessToken, req.body.newPin)); } catch (err) { res.status(400).json({ error: err.message }); } });
 app.get('/api/auth/me', async (req, res) => { try { const token = (req.headers.authorization || '').replace('Bearer ', '').trim(); res.json({ profile: await auth.getProfile(token) }); } catch (err) { res.status(401).json({ error: err.message }); } });
 app.put('/api/auth/profile', async (req, res) => { try { const token = (req.headers.authorization || '').replace('Bearer ', '').trim(); res.json({ profile: await auth.updateProfile(token, req.body) }); } catch (err) { res.status(400).json({ error: err.message }); } });
+app.post('/api/auth/refresh', async (req, res) => { try { res.json({ session: await auth.refresh(req.body.refreshToken) }); } catch (err) { res.status(401).json({ error: err.message }); } });
 
-app.post('/api/telegram/webhook', async (req, res) => {
-  try {
-    const msg = req.body?.message || req.body?.edited_message;
-    if (msg) await tg.handleMessage(msg);
-  } catch (err) {}
-  res.sendStatus(200);
-});
+app.post('/api/telegram/webhook', async (req, res) => { try { const msg = req.body?.message || req.body?.edited_message; if (msg) await tg.handleMessage(msg); } catch (err) {} res.sendStatus(200); });
+app.post('/api/push/subscribe', async (req, res) => { try { const { subscription, userId } = req.body || {}; await db.admin.from('push_subscriptions').upsert({ endpoint: subscription.endpoint, p256dh: subscription.keys.p256dh, auth: subscription.keys.auth, user_id: userId || null }, { onConflict: 'endpoint' }); res.json({ ok: true }); } catch (err) { res.status(500).json({ error: err.message }); } });
+async function sendPushToAll(payload) {
+  if (!webpush) return { sent: 0 };
+  const { data: subs } = await db.admin.from('push_subscriptions').select('*'); let sent = 0, toDelete = [];
+  for (const sub of (subs || [])) { try { await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, JSON.stringify(payload)); sent++; } catch (err) { if (err.statusCode === 410 || err.statusCode === 404) toDelete.push(sub.endpoint); } }
+  if (toDelete.length) await db.admin.from('push_subscriptions').delete().in('endpoint', toDelete); return { sent };
+}
+global.sendPushToAll = sendPushToAll;
+app.get('/api/push/test', async (req, res) => { res.json(await sendPushToAll({ title: "Will's AI — Test", body: 'Push notifications are working!', url: '/' })); });
 
-app.post('/api/push/subscribe', async (req, res) => {
-  try {
-    const { subscription, userId } = req.body || {};
-    await db.admin.from('push_subscriptions').upsert({ endpoint: subscription.endpoint, p256dh: subscription.keys.p256dh, auth: subscription.keys.auth, user_id: userId || null }, { onConflict: 'endpoint' });
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// CRON JOBS (This fixes emails & Telegram)
+// CRON JOBS
 cron.schedule('0 4 * * *', async () => { try { await require('./ffScraper').scrape(); } catch (e) {} });
 cron.schedule('*/30 * * * *', async () => { try { await require('./newsScraper').fetchAll(); } catch (e) {} });
 cron.schedule('* * * * *', () => { alerts.runAll().catch(e => console.error('[cron] alerts:', e.message)); });
 cron.schedule('0 3 * * *', async () => { try { await require('./ffScraper').cleanup(); } catch (e) {} try { await alerts.cleanupOldLogs(); } catch (e) {} });
 
-setTimeout(async () => {
-  try { await require('./ffScraper').scrape(); } catch (e) {}
-  try { await require('./newsScraper').fetchAll(); } catch (e) {}
-  try { await alerts.runAll(); } catch (e) {}
-}, 5000);
+setTimeout(async () => { try { await require('./ffScraper').scrape(); } catch (e) {} try { await require('./newsScraper').fetchAll(); } catch (e) {} try { await alerts.runAll(); } catch (e) {} }, 5000);
 
 app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Will's AI running on port ${PORT}`);
-  if (process.env.PUBLIC_URL && tg.hasToken && tg.useWebhook) tg.setWebhook(process.env.PUBLIC_URL);
-});
+app.listen(PORT, '0.0.0.0', () => { console.log(`Will's AI running on port ${PORT}`); if (process.env.PUBLIC_URL && tg.hasToken && tg.useWebhook) tg.setWebhook(process.env.PUBLIC_URL); });
