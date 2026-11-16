@@ -9,8 +9,6 @@
 <link rel="stylesheet" href="/styles.css" />
 <!-- Telegram Mini App SDK -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<!-- Monetag Verification -->
-<meta name="monetag" content="YOUR_MONETAG_CODE_HERE">
 <style>
   #authPanel, #prefPanel, #authOverlay, #eventModal { display: none !important; }
   #authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open { display: flex !important; }
@@ -46,22 +44,17 @@
   .quick-symbols { display: flex; gap: 6px; padding: 10px 15px; overflow-x: auto; background: var(--bg); border-top: 1px solid var(--border); }
   .quick-symbols::-webkit-scrollbar { height: 0; }
   .quick-symbols button { padding: 6px 12px; background: var(--bg3); border: 1px solid var(--border); color: var(--text-dim); border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
-  .quick-symbols button:hover { border-color: var(--accent); color: var(--text); }
   .chat-input-area { display: flex; align-items: center; gap: 8px; padding: 10px 15px; background: var(--bg); border-top: 1px solid var(--border); }
   .chat-input-area textarea { flex: 1; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 20px; color: var(--text); font-family: inherit; font-size: 13px; resize: none; min-height: 40px; max-height: 80px; }
-  .chat-input-area textarea:focus { outline: none; border-color: var(--accent); }
   .tf-select-small { padding: 8px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 11px; font-weight: 600; font-family: inherit; cursor: pointer; }
   .btn-send { padding: 0 16px; height: 40px; background: var(--accent); border: none; border-radius: 20px; color: var(--bg); font-weight: 700; font-size: 13px; cursor: pointer; }
-  .btn-send:disabled { opacity: 0.5; }
   .typing { display: none; align-self: flex-start; background: var(--bg3); padding: 12px 16px; border-radius: 12px; color: var(--accent); font-size: 12px; font-weight: 600; font-style: italic; }
   .typing.show { display: block; animation: slide 0.2s ease; }
   
-  /* Ad spacing so it doesn't interfere */
-  body { padding-bottom: 80px; }
+  body { padding-bottom: 80px; } /* Space for Social Bar */
 </style>
 </head>
 <body data-theme="dark">
-
 <audio id="alertSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
 
 <div class="pwa-banner" id="pwaBanner">
@@ -93,7 +86,6 @@
   <span class="last-updated" id="lastUpdated">—</span>
 </div>
 
-<!-- CALENDAR PANEL -->
 <div class="panel active" id="panel-calendar">
   <div class="day-filter" style="padding-bottom: 0;">
     <button class="day-btn active" data-day="today">Today</button>
@@ -103,11 +95,9 @@
     <button class="day-btn" id="watchlistBtn">⭐ Watchlist</button>
     <button class="day-btn tz-btn" id="tzToggle">🌍 Loading…</button>
   </div>
-
   <div style="padding: 8px 16px; background: var(--bg); position: sticky; top: 140px; z-index: 90;">
     <input type="text" id="calendarSearch" placeholder="Search events (e.g. CPI, NFP)..." style="width: 100%; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px;" />
   </div>
-
   <div class="currency-filter" id="currencyFilter" style="top: 190px;">
     <button class="cur-btn active" data-cur="all">All</button>
     <button class="cur-btn" data-cur="USD">🇺🇸 USD</button>
@@ -120,13 +110,11 @@
     <button class="cur-btn" data-cur="CHF">🇨🇭 CHF</button>
     <button class="cur-btn" data-cur="CNY">🇨🇳 CNY</button>
   </div>
-
   <div class="stats" style="top: 240px;">
     <div class="stat"><div class="lbl">Total</div><div class="val" id="statTotal">—</div></div>
     <div class="stat"><div class="lbl">High</div><div class="val high" id="statHigh">—</div></div>
     <div class="stat"><div class="lbl">Medium</div><div class="val medium" id="statMedium">—</div></div>
   </div>
-
   <div class="table-wrap">
     <table>
       <thead><tr><th class="col-time">Time</th><th class="col-ccy">CCY</th><th class="col-imp"></th><th class="col-event">Event</th></tr></thead>
@@ -134,7 +122,7 @@
     </table>
   </div>
   
-  <!-- MOVED HERE: Banner ad at the bottom of the Calendar page, out of the way -->
+  <!-- Banner Ad at the bottom of Calendar -->
   <div style="display: flex; justify-content: center; padding: 20px 0; min-height: 60px;">
     <script type="text/javascript">
       atOptions = { 'key' : '96b72905874892a84a96a2c741da40bd', 'format' : 'iframe', 'height' : 60, 'width' : 468, 'params' : {} };
@@ -143,7 +131,6 @@
   </div>
 </div>
 
-<!-- NEWS PANEL -->
 <div class="panel" id="panel-news">
   <div class="news-controls">
     <button class="day-btn active" data-cat="all">All</button>
@@ -158,7 +145,6 @@
   <div class="news-grid" id="newsGrid"><div class="empty">Loading news…</div></div>
 </div>
 
-<!-- SIGNAL PANEL -->
 <div class="panel" id="panel-signal">
   <div class="signal-wrapper">
     <button class="btn-back" id="signalBackBtn">←</button>
@@ -172,7 +158,6 @@
       <h2 class="signal-title">Will's AI Signal</h2>
       <p class="signal-sub">Making sure AI works for your family</p>
     </div>
-
     <div class="signal-chat">
       <div class="chat-messages" id="signalChatMessages">
         <div class="msg bot">Hello! Select a symbol below or type a message to get a market signal.</div>
@@ -195,7 +180,7 @@
   </div>
 </div>
 
-<!-- Auth & Pref Panels (Keep your existing ones) -->
+<!-- Auth & Pref Panels -->
 <div class="auth-overlay" id="authOverlay"></div>
 <aside class="auth-panel" id="authPanel">
   <button class="auth-close" id="authClose">✕</button>
