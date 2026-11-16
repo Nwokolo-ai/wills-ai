@@ -1,13 +1,11 @@
 {
   "name": "wills-ai",
   "version": "1.0.0",
-  "description": "Will's AI — Live economic calendar, news, and alerts",
+  "description": "Will's AI",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "scrape": "node ffScraper.js",
-    "news": "node newsScraper.js"
+    "dev": "node server.js"
   },
   "engines": {
     "node": ">=20.0.0"
