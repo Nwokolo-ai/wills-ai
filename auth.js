@@ -64,14 +64,24 @@ async function signup({ username, pin, email }) {
   if (!avail) throw new Error('Username is already taken');
 
   const internalEmail = `${username.toLowerCase()}@wills-ai.local`;
+  
+  // FIX: We are adding email to user_metadata so it is saved in the secure auth vault
   const { data: created, error: authErr } = await admin.auth.admin.createUser({
-    email: internalEmail, password: pin, email_confirm: true, user_metadata: { username },
+    email: internalEmail, 
+    password: pin, 
+    email_confirm: true, 
+    user_metadata: { username, email }, 
   });
 
   if (authErr) throw new Error('Signup failed: ' + authErr.message);
 
   const userId = created.user.id;
-  await admin.from('profiles').insert({ id: userId, username, email });
+  const { error: profErr } = await admin.from('profiles').insert({ id: userId, username, email });
+  
+  if (profErr) {
+    await admin.auth.admin.deleteUser(userId).catch(() => {});
+    throw new Error('Could not create profile: ' + profErr.message);
+  }
 
   const session = await login({ username, pin });
 
@@ -81,7 +91,7 @@ async function signup({ username, pin, email }) {
         const events = await getUpcomingEvents(3);
         const { subject, html } = welcomeEmail({ username, email }, events);
         await sendEmail({ to: email, subject, html });
-      } catch (err) {}
+      } catch (err) { console.error('[auth] welcome email failed:', err.message); }
     })();
   }
 
@@ -96,20 +106,29 @@ async function login({ username, pin }) {
   if (error) throw new Error('Invalid username or PIN');
   
   return {
-    accessToken: data.session.access_token, refreshToken: data.session.refresh_token,
-    expiresAt: data.session.expires_at, userId: data.user.id,
+    accessToken: data.session.access_token, 
+    refreshToken: data.session.refresh_token,
+    expiresAt: data.session.expires_at, 
+    userId: data.user.id,
   };
 }
 
 async function forgotPin(username) {
   if (!username) throw new Error('Username is required');
+  
+  // Get the real email from the profiles table
   const { data: profile } = await admin.from('profiles').select('email').eq('username', username).maybeSingle();
   if (!profile || !profile.email) throw new Error('No account found with that username, or no email on file.');
 
   const internalEmail = `${username.toLowerCase()}@wills-ai.local`;
+  
+  // Generate the Supabase recovery link
   const { data, error } = await admin.auth.admin.generateLink({
-    type: 'recovery', email: internalEmail, options: { redirectTo: `${process.env.PUBLIC_URL}/` } 
+    type: 'recovery', 
+    email: internalEmail, 
+    options: { redirectTo: `${process.env.PUBLIC_URL}/` } 
   });
+  
   if (error) throw new Error('Could not generate reset link');
 
   const link = data.properties.action_link;
@@ -122,7 +141,8 @@ async function forgotPin(username) {
 
 async function resetPinWithToken(accessToken, newPin) {
   if (!accessToken || !newPin) throw new Error('Missing token or PIN');
-  if (newPin.length < 6 || newPin.length > 12) throw new Error('PIN must be 6-12 digits');
+  const pErr = validatePin(newPin);
+  if (pErr) throw new Error(pErr);
 
   const { data: userData, error: uErr } = await admin.auth.getUser(accessToken);
   if (uErr || !userData?.user) throw new Error('Reset link expired or invalid');
@@ -137,8 +157,10 @@ async function refresh(refreshToken) {
   const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
   if (error) throw new Error('Session expired');
   return {
-    accessToken: data.session.access_token, refreshToken: data.session.refresh_token,
-    expiresAt: data.session.expires_at, userId: data.user.id,
+    accessToken: data.session.access_token, 
+    refreshToken: data.session.refresh_token,
+    expiresAt: data.session.expires_at, 
+    userId: data.user.id,
   };
 }
 
@@ -154,7 +176,10 @@ async function updateProfile(accessToken, updates) {
   const { data: userData, error: uErr } = await admin.auth.getUser(accessToken);
   if (uErr || !userData?.user) throw new Error('Invalid session');
 
-  const allowed = ['phone','country','timezone','email_alerts','alert_minutes','currencies','alert_impact','news_categories','email','currency_filter','watchlist','alert_channels'];
+  const allowed = [
+    'phone','country','timezone','email_alerts','alert_minutes','currencies',
+    'alert_impact','news_categories','email','currency_filter','watchlist','alert_channels'
+  ];
   const clean = {};
   for (const key of allowed) if (key in updates) clean[key] = updates[key];
   if (!Object.keys(clean).length) throw new Error('No valid fields');
