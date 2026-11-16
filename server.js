@@ -112,7 +112,7 @@ app.post('/api/signal', async (req, res) => {
       body: JSON.stringify({ model: 'open-mistral-7b', messages: [{ role: 'user', content: prompt }], temperature: 0.5 })
     });
     const mistralData = await mistralRes.json();
-    if (!mistralRes.ok) throw new Error(mistralData.error?.message || 'Mistral Error');
+    if (!mistralRes.ok) throw new Error(mistralData.error?.message || 'high traffic');
     res.json({ signal: mistralData.choices[0].message.content });
 
   } catch (err) { res.status(500).json({ error: err.message }); }
