@@ -253,6 +253,12 @@ $('gateSignupBtn')?.addEventListener('click', () => {
   $('authGateModal').classList.remove('open');
   openAuth('signup');
 });
+// Click outside to close the Auth Gate Modal
+$('authGateModal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'authGateModal') {
+    $('authGateModal').classList.remove('open');
+  }
+});
 (async function init() {
   checkUrlForResetToken(); 
   if (Auth.isLoggedIn) await Auth.ensureFresh();
