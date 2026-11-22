@@ -46,12 +46,10 @@
   .quick-symbols button { padding: 6px 12px; background: var(--bg3); border: 1px solid var(--border); color: var(--text-dim); border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
   .chat-input-area { display: flex; align-items: center; gap: 8px; padding: 10px 15px; background: var(--bg); border-top: 1px solid var(--border); }
   .chat-input-area textarea { flex: 1; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 20px; color: var(--text); font-family: inherit; font-size: 13px; resize: none; min-height: 40px; max-height: 80px; }
-  .tf-select-small { padding: 8px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 11px; font-weight: 600; font-family: inherit; cursor: pointer; }
   .btn-send { padding: 0 16px; height: 40px; background: var(--accent); border: none; border-radius: 20px; color: var(--bg); font-weight: 700; font-size: 13px; cursor: pointer; }
   .typing { display: none; align-self: flex-start; background: var(--bg3); padding: 12px 16px; border-radius: 12px; color: var(--accent); font-size: 12px; font-weight: 600; font-style: italic; }
   .typing.show { display: block; animation: slide 0.2s ease; }
-  
-  body { padding-bottom: 80px; } /* Space for Social Bar */
+  body { padding-bottom: 80px; }
 </style>
 </head>
 <body data-theme="dark">
@@ -86,6 +84,7 @@
   <span class="last-updated" id="lastUpdated">—</span>
 </div>
 
+<!-- CALENDAR PANEL -->
 <div class="panel active" id="panel-calendar">
   <div class="day-filter" style="padding-bottom: 0;">
     <button class="day-btn active" data-day="today">Today</button>
@@ -121,8 +120,6 @@
       <tbody id="tbody"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
     </table>
   </div>
-  
-  <!-- Banner Ad at the bottom of Calendar -->
   <div style="display: flex; justify-content: center; padding: 20px 0; min-height: 60px;">
     <script type="text/javascript">
       atOptions = { 'key' : '96b72905874892a84a96a2c741da40bd', 'format' : 'iframe', 'height' : 60, 'width' : 468, 'params' : {} };
@@ -131,6 +128,7 @@
   </div>
 </div>
 
+<!-- NEWS PANEL -->
 <div class="panel" id="panel-news">
   <div class="news-controls">
     <button class="day-btn active" data-cat="all">All</button>
@@ -145,6 +143,7 @@
   <div class="news-grid" id="newsGrid"><div class="empty">Loading news…</div></div>
 </div>
 
+<!-- SIGNAL PANEL (Veritasium 7-TF Mode) -->
 <div class="panel" id="panel-signal">
   <div class="signal-wrapper">
     <button class="btn-back" id="signalBackBtn">←</button>
@@ -156,12 +155,12 @@
         </div>
       </div>
       <h2 class="signal-title">Will's AI Signal</h2>
-      <p class="signal-sub">Making sure AI works for your family</p>
+      <p class="signal-sub">7-TF Institutional Analysis</p>
     </div>
     <div class="signal-chat">
       <div class="chat-messages" id="signalChatMessages">
         <div class="msg bot">Hello! Select a symbol below or type a message to get a market signal.</div>
-        <div class="typing" id="signalTyping">Analyzing market data...</div>
+        <div class="typing" id="signalTyping">Analyzing 7 timeframes + SMC + Volume Profile...</div>
       </div>
       <div style="display: flex; gap: 6px; padding: 8px 15px; background: var(--bg); border-top: 1px solid var(--border); overflow-x: auto;">
         <button class="ctx-btn active" data-ctx="price">🕒 Price Only</button>
@@ -172,7 +171,6 @@
         <button data-sym="XAUUSD">🥇 Gold</button><button data-sym="EURUSD">💶 EUR/USD</button><button data-sym="BTCUSD">₿ Bitcoin</button><button data-sym="GBPUSD">🇬🇧 GBP/USD</button><button data-sym="XAGUSD">🥈 Silver</button>
       </div>
       <div class="chat-input-area">
-        <select id="signalTF" class="tf-select-small"><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h" selected>1h</option><option value="4h">4h</option><option value="1d">1d</option></select>
         <textarea id="signalInput" rows="1" placeholder="Type a message..."></textarea>
         <button class="btn-send" id="signalSendBtn">Send</button>
       </div>
@@ -241,9 +239,7 @@
   </div>
 </div>
 
-<!-- Adsterra Social Bar -->
 <script data-cfasync="false" src="https://bauval.org/14/5b52621b807300dc3490c94bd778bd49"></script>
-
 <script src="/auth-client.js"></script>
 <script src="/app.js"></script>
 </body>
