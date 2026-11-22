@@ -239,6 +239,22 @@
   </div>
 </div>
 
+
+<!-- Auth Gate Modal -->
+<div class="modal-overlay" id="authGateModal">
+  <div class="modal-box" id="authGateModalBox" style="text-align: center;">
+    <button class="modal-close" onclick="document.getElementById('authGateModal').classList.remove('open')">✕</button>
+    <div style="font-size: 40px; margin-bottom: 10px;">🔒</div>
+    <h2 style="font-size: 20px; font-weight: 800; color: var(--accent); margin-bottom: 10px;">Premium Feature</h2>
+    <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 25px; line-height: 1.5;">
+      You need an account to use the AI Signal Generator. Get access to institutional-grade 7-timeframe analysis, Smart Money Concepts, and real-time trading signals.
+    </p>
+    <div style="display: flex; gap: 10px;">
+      <button class="detail-btn" id="gateLoginBtn" style="flex: 1; padding: 12px;">Sign In</button>
+      <button class="detail-btn primary" id="gateSignupBtn" style="flex: 1; padding: 12px;">Create Account</button>
+    </div>
+  </div>
+</div>
 <script data-cfasync="false" src="https://bauval.org/14/5b52621b807300dc3490c94bd778bd49"></script>
 <script src="/auth-client.js"></script>
 <script src="/app.js"></script>
