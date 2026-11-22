@@ -243,7 +243,16 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
 if (window.navigator.standalone !== true) { const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream; if (isIOS && canShowPwaBanner()) setTimeout(() => { const b = $('pwaBanner'); if (b) { b.querySelector('.pwa-install').textContent = 'How to install'; b.querySelector('.pwa-install').addEventListener('click', () => alert("1. Tap 'Share'\n2. 'Add to Home Screen'")); b.classList.add('show'); } }, 30000); }
 $('pwaInstall')?.addEventListener('click', async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; $('pwaBanner')?.classList.remove('show'); });
 $('pwaDismiss')?.addEventListener('click', () => { localStorage.setItem('pwa_dismissed_at', String(Date.now())); $('pwaBanner')?.classList.remove('show'); });
+// AUTH GATE MODAL LISTENERS
+$('gateLoginBtn')?.addEventListener('click', () => {
+  $('authGateModal').classList.remove('open');
+  openAuth('login');
+});
 
+$('gateSignupBtn')?.addEventListener('click', () => {
+  $('authGateModal').classList.remove('open');
+  openAuth('signup');
+});
 (async function init() {
   checkUrlForResetToken(); 
   if (Auth.isLoggedIn) await Auth.ensureFresh();
