@@ -190,9 +190,13 @@ document.querySelectorAll('.ctx-btn').forEach(btn => btn.addEventListener('click
 
 async function handleSignalRequest(symbol, customText = null) {
   if (!Auth.isLoggedIn) {
-    alert('Please sign in to use the Signal AI.');
-    openAuth('login');
+    // Show the custom pop-up instead of an alert
+    $('authGateModal').classList.add('open');
     return;
+  }
+  
+  if ($('signalSendBtn').disabled) return;
+  // ... rest of the function
   }
   
   if ($('signalSendBtn').disabled) return;
