@@ -185,8 +185,9 @@ RULES FOR YOUR ANALYSIS:
 2. CONFLICT = HOLD: If the technicals (RSI, MACD, CVD) disagree with the Volume Profile (POC/VAH/VAL), or if the HTF disagrees with LTF, you MUST output HOLD.
 3. NEWS FILTER: If a High Impact event is pending (Actual is missing), DO NOT trade. Tell the user to wait for the news to pass. If news just passed, check if it contradicts the technical trend; if it does, output HOLD.
 4. RISK PROTOCOL: Your Stop Loss must be placed behind a recent swing high/low or the POC. Never use a fixed pip stop loss. 
-5. Be extremely conservative. It is better to miss a trade than to take a bad one.`;
-
+5. Be extremely conservative. It is better to miss a trade than to take a bad one.
+6. you must be perfect.
+7. don't make wrong decisions `,
     const userPrompt = `Data for ${targetSymbol}:\n${prompt}\n\nAnalyze the data above. Output a signal (BUY, SELL, or HOLD). Provide strict Entry, SL, and TP levels. Explain your reasoning based ONLY on the data provided.`;
 
     // 5. Send to Mistral (Using Mixtral 8x7B for better reasoning)
