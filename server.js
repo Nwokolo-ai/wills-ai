@@ -153,13 +153,15 @@ app.post('/api/signal', async (req, res) => {
       }
     }
 
-    // 4. Build the institutional Prompt for Mistral
+    //     // ... (Keep the 7-TF data fetching and Macro Context building exactly as it is above) ...
+
+    // 4. Build the STRICT Institutional Prompt for Mistral
     let prompt = `SYMBOL: ${targetSymbol}\n`;
     
     if (contextStr) {
       prompt += `\n--- MACRO CONTEXT ---\n${contextStr}\n---------------------\n\n`;
     } else {
-      prompt += `\n--- MACRO CONTEXT ---\nUser requested PRICE ACTION ONLY. Ignore news/events.\n---------------------\n\n`;
+      prompt += `\n--- MACRO CONTEXT ---\nUser requested PRICE ACTION ONLY.\n---------------------\n\n`;
     }
 
     prompt += `RAW MULTI-TF DATA + QUANT + ORDER FLOW + VOLUME PROFILE\n\n`;
@@ -172,35 +174,34 @@ app.post('/api/signal', async (req, res) => {
       prompt += `RSI: ${data.rsi.toFixed(1)} | MACD Hist: ${data.macd.histogram.toFixed(4)} | Z-Score: ${data.zScore.toFixed(2)} | Hurst: ${data.hurst.toFixed(2)}\n`;
       if (data.cvd) prompt += `CVD Trend: ${data.cvd.trend}\n`;
       if (data.valueArea) prompt += `Value Area: VAL $${data.valueArea.val} | POC $${data.valueArea.poc} | VAH $${data.valueArea.vah}\n`;
-      if (data.vwapBands) prompt += `VWAP: $${data.vwapBands.vwap}\n`;
       prompt += `\n`;
     }
 
-    prompt += `\nYou are Veritasium AI, a professional institutional trading analyst. 
-Analyze the provided price data. Incorporate the Macro Context (events/news) ONLY if it is provided above. 
-IMPORTANT: If an economic event is missing a forecast or an actual number, base your analysis on whatever data is provided (Previous, Actual, or Forecast). 
-Provide a BUY/SELL/HOLD signal with specific Entry, SL, and TP levels.`;
+    // THE NEW SYSTEM PROMPT - STRICT RULES
+    const systemPrompt = `You are a ruthless, institutional algorithmic trader. You do NOT guess. You only trade when there is absolute confluence. 
 
-    // 5. Send to Mistral
+RULES FOR YOUR ANALYSIS:
+1. HTF DOMINANCE: The 1D and 4h trend ALWAYS overrules the 1m and 5m. If 1D is bearish, you only look for SELL setups, regardless of what the lower timeframes say.
+2. CONFLICT = HOLD: If the technicals (RSI, MACD, CVD) disagree with the Volume Profile (POC/VAH/VAL), or if the HTF disagrees with LTF, you MUST output HOLD.
+3. NEWS FILTER: If a High Impact event is pending (Actual is missing), DO NOT trade. Tell the user to wait for the news to pass. If news just passed, check if it contradicts the technical trend; if it does, output HOLD.
+4. RISK PROTOCOL: Your Stop Loss must be placed behind a recent swing high/low or the POC. Never use a fixed pip stop loss. 
+5. Be extremely conservative. It is better to miss a trade than to take a bad one.`;
+
+    const userPrompt = `Data for ${targetSymbol}:\n${prompt}\n\nAnalyze the data above. Output a signal (BUY, SELL, or HOLD). Provide strict Entry, SL, and TP levels. Explain your reasoning based ONLY on the data provided.`;
+
+    // 5. Send to Mistral (Using Mixtral 8x7B for better reasoning)
     const mistralRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST', 
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
-      body: JSON.stringify({ model: 'open-mistral-7b', messages: [{ role: 'user', content: prompt }], temperature: 0.3 })
-    });
-    
-    const mistralData = await mistralRes.json();
-    if (!mistralRes.ok) throw new Error(mistralData.error?.message || 'Mistral error');
-    
-    res.json({ 
-      signal: mistralData.choices[0].message.content, 
-      isDataAnalysis: true,
-      rawData: tfData,
-      symbol: targetSymbol
-    });
-
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-// ─────────────────────────────────────────────────────────────────
+      body: JSON.stringify({ 
+        model: 'open-mixtral-8x7b', // UPGRADED MODEL
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ], 
+        temperature: 0.1 // 0.1 makes it highly logical and uncreative (no guessing)
+      })
+    }),
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
 app.post('/api/auth/signup', authLimiter, async (req, res) => { try { res.json(await auth.signup(req.body)); } catch (err) { res.status(400).json({ error: err.message }); } });
