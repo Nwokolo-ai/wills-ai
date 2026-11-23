@@ -12,7 +12,7 @@ const db = require('./db');
 const alerts = require('./alerts');
 const tg = require('./telegram');
 
-// ─── NEW: Veritasium Indicators Math ───
+// ─── Veritasium Indicators Math ───
 const { calculateRawIndicators } = require('./indicators');
 
 const app = express();
@@ -59,7 +59,7 @@ app.get('/api/news', (req, res) => {
   catch (err) { res.json({ items: [] }); }
 });
 
-// ─── OVERWRITTEN: SIGNAL AI ROUTE WITH BIQUOTE + VERITASIUM MATH ───
+// ─── SIGNAL AI ROUTE (Biquote 7-TF + Smart Events) ───
 app.post('/api/signal', async (req, res) => {
   try {
     const { symbol, timeframe, text, contextMode } = req.body;
@@ -98,15 +98,9 @@ app.post('/api/signal', async (req, res) => {
         const ohlcData = await cachedFetch(url);
         
         if (ohlcData && ohlcData.bars && ohlcData.bars.length >= 60) {
-          // Map Biquote data to the format our indicators expect
           const candles = ohlcData.bars.map(b => ({
-            open: b.open,
-            high: b.high,
-            low: b.low,
-            close: b.close,
-            volume: b.volume || 0
+            open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume || 0
           }));
-          
           const calculated = calculateRawIndicators(candles);
           if (calculated) tfData[tf] = calculated;
         }
@@ -117,11 +111,59 @@ app.post('/api/signal', async (req, res) => {
       throw new Error("Could not fetch data from Biquote. Check symbol or try again later.");
     }
 
-    // 3. Build the institutional Prompt for Mistral
+    // 3. Build the Macro Context (News & Events) based on user's button click
     let contextStr = "";
-    // (Optional: If you want to include your DB economic events here, you can add the old contextMode logic back)
+    
+    if (contextMode === 'events' || contextMode === 'both') {
+      const today = new Date().toISOString().slice(0, 10);
+      
+      const { data: events } = await db.admin.from('calendar_events')
+        .select('currency, title, impact, actual, forecast, previous, beat_miss')
+        .eq('event_date', today)
+        .in('impact', ['high', 'medium'])
+        .limit(8); 
+        
+      if (events && events.length > 0) {
+        contextStr += "ECONOMIC EVENTS TODAY:\n";
+        events.forEach(e => { 
+          let details = [];
+          if (e.previous && e.previous.trim() !== '' && e.previous !== '—') details.push(`Previous: ${e.previous}`);
+          if (e.forecast && e.forecast.trim() !== '' && e.forecast !== '—') details.push(`Forecast: ${e.forecast}`);
+          if (e.actual && e.actual.trim() !== '' && e.actual !== '—') details.push(`Actual: ${e.actual}`);
+          if (e.beat_miss && e.beat_miss.trim() !== '') details.push(`Result: ${e.beat_miss}`);
+          
+          let dataString = details.length > 0 ? details.join(' | ') : 'No numerical data released yet';
+          contextStr += `- ${e.currency} ${e.title} (${e.impact.toUpperCase()}): ${dataString}\n`; 
+        });
+      } else {
+        contextStr += "ECONOMIC EVENTS TODAY: None reported yet.\n";
+      }
+    }
 
-    let prompt = `SYMBOL: ${targetSymbol}\nRAW MULTI-TF DATA + QUANT + ORDER FLOW + VOLUME PROFILE\n\n`;
+    if (contextMode === 'both') {
+      try {
+        const newsData = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'investing_news.json'), 'utf8'));
+        const latestNews = (newsData.items || []).slice(0, 3); 
+        if (latestNews.length > 0) { 
+          contextStr += "\nLATEST MACRO NEWS:\n"; 
+          latestNews.forEach(n => { contextStr += `- ${n.title}\n`; }); 
+        }
+      } catch (e) {
+        console.warn("Could not read news file for AI context:", e.message);
+      }
+    }
+
+    // 4. Build the institutional Prompt for Mistral
+    let prompt = `SYMBOL: ${targetSymbol}\n`;
+    
+    if (contextStr) {
+      prompt += `\n--- MACRO CONTEXT ---\n${contextStr}\n---------------------\n\n`;
+    } else {
+      prompt += `\n--- MACRO CONTEXT ---\nUser requested PRICE ACTION ONLY. Ignore news/events.\n---------------------\n\n`;
+    }
+
+    prompt += `RAW MULTI-TF DATA + QUANT + ORDER FLOW + VOLUME PROFILE\n\n`;
+    
     for (const [tf, data] of Object.entries(tfData)) {
       if (!data) continue;
       prompt += `⏱ ${tf.toUpperCase()} TIMEFRAME\n`;
@@ -134,9 +176,12 @@ app.post('/api/signal', async (req, res) => {
       prompt += `\n`;
     }
 
-    prompt += `\nYou are Veritasium AI, a professional institutional trading analyst. Analyze this data using SMC, Order Flow, and Quant models. Provide a BUY/SELL/HOLD signal with specific Entry, SL, and TP levels.`;
+    prompt += `\nYou are Veritasium AI, a professional institutional trading analyst. 
+Analyze the provided price data. Incorporate the Macro Context (events/news) ONLY if it is provided above. 
+IMPORTANT: If an economic event is missing a forecast or an actual number, base your analysis on whatever data is provided (Previous, Actual, or Forecast). 
+Provide a BUY/SELL/HOLD signal with specific Entry, SL, and TP levels.`;
 
-    // 4. Send to Mistral
+    // 5. Send to Mistral
     const mistralRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST', 
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
@@ -146,7 +191,6 @@ app.post('/api/signal', async (req, res) => {
     const mistralData = await mistralRes.json();
     if (!mistralRes.ok) throw new Error(mistralData.error?.message || 'Mistral error');
     
-    // Return both the AI text and raw data for UI cards
     res.json({ 
       signal: mistralData.choices[0].message.content, 
       isDataAnalysis: true,
