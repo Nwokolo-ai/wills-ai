@@ -10,8 +10,8 @@
 <!-- Telegram Mini App SDK -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
- #authPanel, #prefPanel, #authOverlay, #eventModal, #authGateModal { display: none !important; }
-#authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open, #authGateModal.open { display: flex !important; }
+  #authPanel, #prefPanel, #authOverlay, #eventModal { display: none !important; }
+  #authPanel.open, #prefPanel.open, #authOverlay.open, #eventModal.open { display: flex !important; }
 
   /* Signal UI Styles */
   .signal-wrapper { display: flex; flex-direction: column; height: calc(100vh - 130px); max-width: 800px; margin: 0 auto; position: relative; padding-bottom: 10px; }
@@ -34,7 +34,7 @@
   .chat-messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 12px; }
   .msg { max-width: 90%; padding: 12px 16px; border-radius: 12px; font-size: 13px; line-height: 1.5; animation: slide 0.2s ease; }
   .msg.user { align-self: flex-end; background: var(--accent); color: var(--bg); border-bottom-right-radius: 4px; font-weight: 500; }
-  .msg.bot { align-self: flex-start; background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; max-width: 100%; width: 100%; }
   @keyframes slide { from { opacity: 0; transform: translateY(5px); } }
   .msg.bot strong { color: var(--accent); }
   .msg.bot .signal-buy { color: var(--beat); font-weight: 800; }
@@ -46,10 +46,47 @@
   .quick-symbols button { padding: 6px 12px; background: var(--bg3); border: 1px solid var(--border); color: var(--text-dim); border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
   .chat-input-area { display: flex; align-items: center; gap: 8px; padding: 10px 15px; background: var(--bg); border-top: 1px solid var(--border); }
   .chat-input-area textarea { flex: 1; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 20px; color: var(--text); font-family: inherit; font-size: 13px; resize: none; min-height: 40px; max-height: 80px; }
+  .tf-select-small { padding: 8px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 11px; font-weight: 600; font-family: inherit; cursor: pointer; }
   .btn-send { padding: 0 16px; height: 40px; background: var(--accent); border: none; border-radius: 20px; color: var(--bg); font-weight: 700; font-size: 13px; cursor: pointer; }
   .typing { display: none; align-self: flex-start; background: var(--bg3); padding: 12px 16px; border-radius: 12px; color: var(--accent); font-size: 12px; font-weight: 600; font-style: italic; }
   .typing.show { display: block; animation: slide 0.2s ease; }
-  body { padding-bottom: 80px; }
+  
+  /* ─── NEW: VERITASIUM DATA CARDS CSS ─── */
+  .data-grid { 
+    display: grid; 
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); 
+    gap: 6px; 
+    margin: 8px 0; 
+    font-size: 0.65rem; 
+    width: 100%;
+  }
+  .data-card { 
+    background: rgba(0,0,0,0.25); 
+    padding: 6px 8px; 
+    border-radius: 6px; 
+    border-left: 2px solid var(--accent); 
+    box-sizing: border-box;
+  }
+  .data-card .label { 
+    color: var(--text-dim); 
+    font-size: 0.55rem; 
+    text-transform: uppercase; 
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+  .data-card .value { 
+    color: var(--text); 
+    font-weight: 600; 
+    font-family: monospace; 
+    font-size: 0.75rem;
+  }
+  .data-card .row { 
+    font-size: 0.55rem; 
+    color: var(--text-dim); 
+    margin-top: 2px;
+  }
+  
+  body { padding-bottom: 80px; } /* Space for Social Bar */
 </style>
 </head>
 <body data-theme="dark">
@@ -84,7 +121,6 @@
   <span class="last-updated" id="lastUpdated">—</span>
 </div>
 
-<!-- CALENDAR PANEL -->
 <div class="panel active" id="panel-calendar">
   <div class="day-filter" style="padding-bottom: 0;">
     <button class="day-btn active" data-day="today">Today</button>
@@ -120,6 +156,8 @@
       <tbody id="tbody"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
     </table>
   </div>
+  
+  <!-- Banner Ad at the bottom of Calendar -->
   <div style="display: flex; justify-content: center; padding: 20px 0; min-height: 60px;">
     <script type="text/javascript">
       atOptions = { 'key' : '96b72905874892a84a96a2c741da40bd', 'format' : 'iframe', 'height' : 60, 'width' : 468, 'params' : {} };
@@ -128,7 +166,6 @@
   </div>
 </div>
 
-<!-- NEWS PANEL -->
 <div class="panel" id="panel-news">
   <div class="news-controls">
     <button class="day-btn active" data-cat="all">All</button>
@@ -143,7 +180,6 @@
   <div class="news-grid" id="newsGrid"><div class="empty">Loading news…</div></div>
 </div>
 
-<!-- SIGNAL PANEL (Veritasium 7-TF Mode) -->
 <div class="panel" id="panel-signal">
   <div class="signal-wrapper">
     <button class="btn-back" id="signalBackBtn">←</button>
@@ -155,12 +191,12 @@
         </div>
       </div>
       <h2 class="signal-title">Will's AI Signal</h2>
-      <p class="signal-sub">7-TF Institutional Analysis</p>
+      <p class="signal-sub">Making sure AI works for your family</p>
     </div>
     <div class="signal-chat">
       <div class="chat-messages" id="signalChatMessages">
         <div class="msg bot">Hello! Select a symbol below or type a message to get a market signal.</div>
-        <div class="typing" id="signalTyping">Analyzing 7 timeframes + SMC + Volume Profile...</div>
+        <div class="typing" id="signalTyping">Analyzing market data...</div>
       </div>
       <div style="display: flex; gap: 6px; padding: 8px 15px; background: var(--bg); border-top: 1px solid var(--border); overflow-x: auto;">
         <button class="ctx-btn active" data-ctx="price">🕒 Price Only</button>
@@ -171,6 +207,7 @@
         <button data-sym="XAUUSD">🥇 Gold</button><button data-sym="EURUSD">💶 EUR/USD</button><button data-sym="BTCUSD">₿ Bitcoin</button><button data-sym="GBPUSD">🇬🇧 GBP/USD</button><button data-sym="XAGUSD">🥈 Silver</button>
       </div>
       <div class="chat-input-area">
+        <select id="signalTF" class="tf-select-small"><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h" selected>1h</option><option value="4h">4h</option><option value="1d">1d</option></select>
         <textarea id="signalInput" rows="1" placeholder="Type a message..."></textarea>
         <button class="btn-send" id="signalSendBtn">Send</button>
       </div>
@@ -239,23 +276,9 @@
   </div>
 </div>
 
-
-<!-- Auth Gate Modal -->
-<div class="modal-overlay" id="authGateModal">
-  <div class="modal-box" id="authGateModalBox" style="text-align: center;">
-    <button class="modal-close" onclick="document.getElementById('authGateModal').classList.remove('open')">✕</button>
-    <div style="font-size: 40px; margin-bottom: 10px;">🔒</div>
-    <h2 style="font-size: 20px; font-weight: 800; color: var(--accent); margin-bottom: 10px;">Premium Feature</h2>
-    <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 25px; line-height: 1.5;">
-      You need an account to use the AI Signal Generator. Get access to institutional-grade 7-timeframe analysis, Smart Money Concepts, and real-time trading signals.
-    </p>
-    <div style="display: flex; gap: 10px;">
-      <button class="detail-btn" id="gateLoginBtn" style="flex: 1; padding: 12px;">Sign In</button>
-      <button class="detail-btn primary" id="gateSignupBtn" style="flex: 1; padding: 12px;">Create Account</button>
-    </div>
-  </div>
-</div>
+<!-- Adsterra Social Bar -->
 <script data-cfasync="false" src="https://bauval.org/14/5b52621b807300dc3490c94bd778bd49"></script>
+
 <script src="/auth-client.js"></script>
 <script src="/app.js"></script>
 </body>
