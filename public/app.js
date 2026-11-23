@@ -419,7 +419,17 @@ $('pwaInstall')?.addEventListener('click', async () => { if (!deferredPrompt) re
 $('pwaDismiss')?.addEventListener('click', () => { localStorage.setItem('pwa_dismissed_at', String(Date.now())); $('pwaBanner')?.classList.remove('show'); });
 
 (async function init() {
-  checkUrlForResetToken(); if (Auth.isLoggedIn) await Auth.ensureFresh();
-  $('tzToggle').textContent = `🌍 ${getTimezoneFullLabel()}`; renderAuthArea(); await refreshAll();
-  setInterval(refreshAll, 60000); setInterval(updateLastUpdated, 30000);
+  // Wrap in try/catch so a failed auth check doesn't stop the calendar from loading
+  try {
+    checkUrlForResetToken(); 
+    if (Auth.isLoggedIn) await Auth.ensureFresh();
+  } catch (e) {
+    console.warn("Auth initialization failed, continuing to load public data:", e);
+  }
+  
+  $('tzToggle').textContent = `🌍 ${getTimezoneFullLabel()}`; 
+  renderAuthArea(); 
+  await refreshAll();
+  setInterval(refreshAll, 60000); 
+  setInterval(updateLastUpdated, 30000);
 })();
