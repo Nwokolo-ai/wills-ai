@@ -103,10 +103,28 @@ function renderNews() {
   grid.innerHTML = `<div class="news-counter">Showing ${items.length} of ${allNews.length} articles</div>` + items.map(n => `<div class="news-card"><h3><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a></h3>${n.snippet ? `<p>${esc(n.snippet)}</p>` : ''}<div class="news-meta"><span class="news-tag ${esc(n.category)}">${esc(n.category)}</span><span>${n.pubDate ? new Date(n.pubDate).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</span></div></div>`).join('');
 }
 
-async function loadCalendar() { try { const res = await fetch('/api/calendar'); if (!res.ok) throw new Error(`HTTP ${res.status}`); const data = await res.json(); allEvents = data.events || []; renderStats(); renderCalendar(); startTicker(); lastLoadedAt = Date.now(); updateLastUpdated(); } catch (err) { $('tbody').innerHTML = `<tr><td colspan="4" class="empty">Failed: ${esc(err.message)}</td></tr>`; } }
-async function loadNews() { try { const res = await fetch('/api/news'); if (!res.ok) throw new Error(`HTTP ${res.status}`); const data = await res.json(); allNews = data.items || []; renderNews(); } catch (err) { $('newsGrid').innerHTML = `<div class="empty">Failed: ${esc(err.message)}</div>`; } }
-async function refreshAll() { await Promise.all([loadCalendar(), loadNews()]); }
+async function loadCalendar() {
+  try {
+    const res = await fetch('/api/calendar', { signal: AbortSignal.timeout(60000) }); // 60s timeout for Render spin-down
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json(); 
+    allEvents = data.events || [];
+    renderStats(); renderCalendar(); startTicker(); lastLoadedAt = Date.now(); updateLastUpdated();
+  } catch (err) { 
+    $('tbody').innerHTML = `<tr><td colspan="4" class="empty">Failed: ${esc(err.message)}<br><br><button onclick="loadCalendar()" style="padding:8px 16px; background:var(--accent); color:var(--bg); border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Retry</button></td></tr>`; 
+  }
+}
 
+async function loadNews() {
+  try {
+    const res = await fetch('/api/news', { signal: AbortSignal.timeout(60000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json(); 
+    allNews = data.items || []; renderNews();
+  } catch (err) { 
+    $('newsGrid').innerHTML = `<div class="empty">Failed: ${esc(err.message)}<br><br><button onclick="loadNews()" style="padding:8px 16px; background:var(--accent); color:var(--bg); border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Retry</button></div>`; 
+  }
+}
 document.querySelectorAll('[data-day]').forEach(btn => btn.addEventListener('click', () => { document.querySelectorAll('[data-day]').forEach(b => b.classList.remove('active')); btn.classList.add('active'); dayFilter = btn.dataset.day; watchlistOnly = false; $('watchlistBtn')?.classList.remove('active'); autoScrollDone = false; renderCalendar(); renderStats(); }));
 $('watchlistBtn')?.addEventListener('click', () => { watchlistOnly = !watchlistOnly; $('watchlistBtn').classList.toggle('active', watchlistOnly); autoScrollDone = false; renderCalendar(); renderStats(); });
 document.querySelectorAll('[data-cur]').forEach(btn => btn.addEventListener('click', () => { document.querySelectorAll('[data-cur]').forEach(b => b.classList.remove('active')); btn.classList.add('active'); currencyFilter = btn.dataset.cur; autoScrollDone = false; renderCalendar(); renderStats(); }));
