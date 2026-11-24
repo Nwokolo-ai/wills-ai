@@ -182,8 +182,9 @@ RULES FOR YOUR ANALYSIS:
 3. HTF DOMINANCE: The 1D and 4h trend ALWAYS overrules the 1m and 5m. If 1D is bearish, you only look for SELL setups.
 4. CONFLICT = HOLD: If the technicals disagree with the Volume Profile, or if the HTF disagrees with LTF, you MUST output HOLD.
 5. NEWS FILTER: If a High Impact event is pending (Actual is missing), DO NOT trade. Output HOLD.
-6. RISK PROTOCOL: Your Stop Loss must be placed behind a recent swing high/low or the POC. Never use a fixed pip stop loss. 
-7. STRICT FORMATTING: At the VERY END of your response, you MUST output the trade levels EXACTLY in this format (replace X with numbers). If the signal is HOLD, put "0" for all numbers:
+6. RISK PROTOCOL: Your Stop Loss must be placed behind a recent swing high/low or the POC/ orderblock/1 ATR. 
+7. BEHAVIOR: perfect analysis, don't make wrong decisions 
+8. STRICT FORMATTING: At the VERY END of your response, you MUST output the trade levels EXACTLY in this format (replace X with numbers). If the signal is HOLD, put "0" for all numbers:
 ---TRADE LEVELS---
 ENTRY: X
 SL: X
