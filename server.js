@@ -111,9 +111,14 @@ return res.json({
   signal: chatMessage,
   isDataAnalysis: false
 });
+} // CLOSES: if (!targetSymbol && text)
 
-    if (!targetSymbol) return res.json({ signal: "Select a symbol or ask a question.", isDataAnalysis: false });
-
+if (!targetSymbol) {
+  return res.json({
+    signal: "Select a symbol or ask a question.",
+    isDataAnalysis: false
+  });
+}
     // 2. Fetch 7 Timeframes from Biquote
     const timeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
     const tfData = {};
