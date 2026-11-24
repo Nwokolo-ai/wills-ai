@@ -79,12 +79,38 @@ app.post('/api/signal', async (req, res) => {
     // 1. Handle standard chat (no market analysis)
     if (!targetSymbol && text) {
       const chatRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
-        body: JSON.stringify({ model: 'mistral-small-latest', messages: [{ role: 'user', content: text }] })
-      });
-      const chatData = await chatRes.json();
-      return res.json({ signal: chatData.choices[0].message.content, isDataAnalysis: false });
-    }
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${mistralKey}`
+  },
+  body: JSON.stringify({
+    model: 'mistral-small-latest',
+    messages: [
+      { role: 'user', content: text }
+    ],
+    temperature: 0.3
+  })
+});
+
+const chatData = await chatRes.json();
+
+if (!chatRes.ok) {
+  throw new Error(
+    chatData.error?.message || `Mistral API error: ${chatRes.status}`
+  );
+}
+
+const chatMessage = chatData.choices?.[0]?.message?.content;
+
+if (!chatMessage) {
+  throw new Error('Mistral returned an empty response.');
+}
+
+return res.json({
+  signal: chatMessage,
+  isDataAnalysis: false
+});
 
     if (!targetSymbol) return res.json({ signal: "Select a symbol or ask a question.", isDataAnalysis: false });
 
