@@ -85,7 +85,7 @@ app.post('/api/signal', async (req, res) => {
     'Authorization': `Bearer ${mistralKey}`
   },
   body: JSON.stringify({
-    model: 'mistral-small-latest',
+    model: 'open-mistral-7b',
     messages: [
       { role: 'user', content: text }
     ],
