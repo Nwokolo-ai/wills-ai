@@ -80,7 +80,7 @@ app.post('/api/signal', async (req, res) => {
     if (!targetSymbol && text) {
       const chatRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
-        body: JSON.stringify({ model: 'open-mixtral-8x7b', messages: [{ role: 'user', content: text }] })
+        body: JSON.stringify({ model: 'mistral-small-latest.', messages: [{ role: 'user', content: text }] })
       });
       const chatData = await chatRes.json();
       return res.json({ signal: chatData.choices[0].message.content, isDataAnalysis: false });
