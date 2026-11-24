@@ -139,8 +139,60 @@ return res.json({
     }));
 
     if (Object.keys(tfData).length === 0) {
-      throw new Error("Could not fetch data from Biquote. Check symbol or try again later.");
+  const fallbackRes = await fetch(
+    'https://api.mistral.ai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${mistralKey}`
+      },
+      body: JSON.stringify({
+        model: 'mistral-small-latest',
+        messages: [
+          {
+            role: 'system',
+            content: `You are the AI assistant for Will's AI trading platform.
+
+Live market data is currently unavailable from the market data provider.
+
+Do not invent prices, candles, indicators, market conditions, entry prices, stop losses, take profits, or BUY/SELL signals.
+
+Explain clearly that a verified live trading analysis cannot be produced without market data.
+
+You may still answer general questions about trading, mathematics, technical analysis, and financial markets.`
+          },
+          {
+            role: 'user',
+            content: text || `I requested a trading analysis for ${targetSymbol}, but live market data is unavailable. Explain what this means.`
+          }
+        ],
+        temperature: 0.2
+      })
     }
+  );
+
+  const fallbackData = await fallbackRes.json();
+
+  if (!fallbackRes.ok) {
+    throw new Error(
+      fallbackData.error?.message || 'Mistral fallback request failed.'
+    );
+  }
+
+  const fallbackMessage = fallbackData.choices?.[0]?.message?.content;
+
+  if (!fallbackMessage) {
+    throw new Error('Mistral returned an empty fallback response.');
+  }
+
+  return res.json({
+    signal: fallbackMessage,
+    isDataAnalysis: false,
+    marketDataUnavailable: true,
+    symbol: targetSymbol
+  });
+}
 
     // 3. Build the Macro Context (News & Events)
     let contextStr = "";
