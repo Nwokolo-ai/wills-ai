@@ -342,7 +342,7 @@ async function renderPrefs() {
   });
 }
 
-// SIGNAL AI
+// ─── SIGNAL AI & CHART LOGIC ───
 document.querySelectorAll('.ctx-btn').forEach(btn => btn.addEventListener('click', () => { document.querySelectorAll('.ctx-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); currentContext = btn.dataset.ctx; }));
 
 async function handleSignalRequest(symbol, customText = null) {
@@ -366,34 +366,62 @@ async function handleSignalRequest(symbol, customText = null) {
 
     let botHtml = '';
 
-    // ─── RENDER VERITASIUM DATA CARDS ───
+    // 1. Render Data Cards
     if (data.isDataAnalysis && data.rawData) {
-      botHtml += `<div style="margin-bottom:8px;font-size:11px;"><strong>📊 ${data.symbol} — 7 TFs + Quant + OF + SMC</strong></div><div class="data-grid">`;
-      
+      botHtml += `<div style="margin-bottom:8px;font-size:11px;"><strong>📊 ${data.symbol} — 7 TFs</strong></div><div class="data-grid">`;
       for (const [tfName, d] of Object.entries(data.rawData)) {
         if (!d) continue;
         const vpIcon = d.volatilityPercentile?.regime.includes('HIGH') ? '🔥' : d.volatilityPercentile?.regime.includes('LOW') ? '❄️' : '•';
-        
         botHtml += `<div class="data-card">
           <div class="label">${tfName.toUpperCase()}</div>
           <div class="value">$${d.price.toFixed(4)}</div>
           <div class="row">RSI: ${d.rsi.toFixed(1)} | Z: ${d.zScore.toFixed(2)}</div>
           <div class="row">Vol%ile: ${d.volatilityPercentile ? d.volatilityPercentile.percentile.toFixed(0) : '—'}% ${vpIcon}</div>
-          <div class="row">CVD: ${d.cvd ? d.cvd.trend.replace(/_/g,' ') : 'n/a'}</div>
-          <div style="font-size:0.5rem;color:var(--accent);">POC $${d.valueArea ? d.valueArea.poc.toFixed(2) : '—'}</div>
         </div>`;
       }
-      botHtml += `</div><br>`;
+      botHtml += `</div>`;
     }
 
-    // ─── FORMAT AI RESPONSE ───
-    botHtml += data.signal.replace(/\n/g,'<br>')
+    // 2. Create unique ID for Chart
+    const chartId = 'chart_' + Date.now();
+    let aiText = data.signal;
+    
+    // 3. Parse AI's chosen timeframe
+    const tfMatch = aiText.match(/PRIMARY TIMEFRAME:\s*(1m|5m|15m|30m|1h|4h|1d)/i);
+    let chosenTF = tfMatch ? tfMatch[1].toLowerCase() : tf;
+
+    // 4. Insert Chart Container
+    if (data.isDataAnalysis && data.allChartCandles && data.allChartCandles[chosenTF]) {
+      botHtml += `<div style="font-size:10px; color:var(--accent); margin-top:10px;">🎯 AI selected <strong>${chosenTF.toUpperCase()}</strong> as the primary timeframe.</div>`;
+      botHtml += `<div class="tv-chart-container" id="${chartId}"></div>`;
+    }
+
+    // 5. Clean AI Text (Hide the strict formatting tags)
+    let cleanText = aiText
+      .replace(/PRIMARY TIMEFRAME:.*?(?=\n|$)/i, '')
+      .replace(/---TRADE LEVELS---[\s\S]*/i, '')
+      .trim();
+    
+    botHtml += `<div style="margin-top:10px;">` + cleanText.replace(/\n/g,'<br>')
       .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
       .replace(/\b(BUY)\b/g,'<span class="signal-buy">BUY</span>')
       .replace(/\b(SELL)\b/g,'<span class="signal-sell">SELL</span>')
-      .replace(/\b(HOLD)\b/g,'<span style="color:#fbbf24;font-weight:800;">HOLD</span>');
+      .replace(/\b(HOLD)\b/g,'<span style="color:#fbbf24;font-weight:800;">HOLD</span>') + `</div>`;
 
     $('signalChatMessages').insertAdjacentHTML('beforeend', `<div class="msg bot">${botHtml}</div>`);
+    $('signalChatMessages').scrollTop = $('signalChatMessages').scrollHeight;
+
+    // 6. Draw the Chart
+    if (data.isDataAnalysis && data.allChartCandles && data.allChartCandles[chosenTF]) {
+      setTimeout(() => {
+        renderTradingChart(
+          chartId, 
+          data.allChartCandles[chosenTF], 
+          aiText
+        );
+      }, 100);
+    }
+
   } catch (e) {
     $('signalTyping').classList.remove('show');
     $('signalChatMessages').insertAdjacentHTML('beforeend', `<div class="msg bot" style="color:#ff6b6b">❌ ${esc(e.message)}</div>`);
@@ -401,6 +429,95 @@ async function handleSignalRequest(symbol, customText = null) {
     $('signalSendBtn').disabled = false; 
     $('signalChatMessages').scrollTop = $('signalChatMessages').scrollHeight; 
   }
+}
+
+// ─── TRADING CHART RENDERER ───
+function renderTradingChart(containerId, candles, aiText) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 300,
+    layout: { background: { type: 'solid', color: '#0d1117' }, textColor: '#d1d5db' },
+    grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#374151' },
+  });
+
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: '#10b981', downColor: '#ef4444', borderVisible: false,
+    wickUpColor: '#10b981', wickDownColor: '#ef4444',
+  });
+
+  const chartData = candles.map(c => ({
+    time: Math.floor(new Date(c.time).getTime() / 1000),
+    open: c.open, high: c.high, low: c.low, close: c.close
+  }));
+  chartData.sort((a, b) => a.time - b.time);
+  candleSeries.setData(chartData);
+
+  // ─── DRAW CURRENT PRICE LINE ───
+  const lastCandle = chartData[chartData.length - 1];
+  if (lastCandle) {
+    candleSeries.createPriceLine({
+      price: lastCandle.close, 
+      color: '#ffffff', 
+      lineWidth: 1, 
+      lineStyle: 2, 
+      axisLabelVisible: true, 
+      title: 'CURRENT',
+    });
+  }
+
+  // ─── EXTRACT STRICT TRADE LEVELS ───
+  const entryMatch = aiText.match(/ENTRY:\s*([\d.]+)/i);
+  const slMatch = aiText.match(/SL:\s*([\d.]+)/i);
+  const tpMatch = aiText.match(/TP:\s*([\d.]+)/i);
+
+  const entry = entryMatch ? parseFloat(entryMatch[1]) : 0;
+  const sl = slMatch ? parseFloat(slMatch[1]) : 0;
+  const tp = tpMatch ? parseFloat(tpMatch[1]) : 0;
+
+  // ─── DRAW ENTRY, SL, TP ZONES ───
+  if (entry > 0) {
+    candleSeries.createPriceLine({
+      price: entry, color: '#fbbf24', lineWidth: 2, lineStyle: 0,
+      axisLabelVisible: true, title: 'ENTRY',
+    });
+  }
+  
+  if (sl > 0) {
+    candleSeries.createPriceLine({
+      price: sl, color: '#ef4444', lineWidth: 2, lineStyle: 0,
+      axisLabelVisible: true, title: 'SL',
+    });
+  }
+  
+  if (tp > 0) {
+    candleSeries.createPriceLine({
+      price: tp, color: '#10b981', lineWidth: 2, lineStyle: 0,
+      axisLabelVisible: true, title: 'TP',
+    });
+    
+    // TP Zone (Shaded area)
+    const isBuy = entry > 0 && tp > entry;
+    const zoneOffset = Math.abs(tp - entry) * 0.15;
+    
+    candleSeries.createPriceLine({
+      price: isBuy ? tp + zoneOffset : tp - zoneOffset, 
+      color: 'rgba(16, 185, 129, 0.4)', 
+      lineWidth: 1, lineStyle: 2, 
+      axisLabelVisible: false, title: '',
+    });
+  }
+
+  chart.timeScale().fitContent();
+
+  new ResizeObserver(entries => {
+    if (entries.length === 0 || entries[0].target.clientWidth === 0) return;
+    chart.applyOptions({ width: entries[0].target.clientWidth });
+  }).observe(container);
 }
 
 document.querySelectorAll('.quick-symbols button').forEach(btn => btn.addEventListener('click', () => handleSignalRequest(btn.dataset.sym)));
@@ -419,7 +536,6 @@ $('pwaInstall')?.addEventListener('click', async () => { if (!deferredPrompt) re
 $('pwaDismiss')?.addEventListener('click', () => { localStorage.setItem('pwa_dismissed_at', String(Date.now())); $('pwaBanner')?.classList.remove('show'); });
 
 (async function init() {
-  // Wrap in try/catch so a failed auth check doesn't stop the calendar from loading
   try {
     checkUrlForResetToken(); 
     if (Auth.isLoggedIn) await Auth.ensureFresh();
