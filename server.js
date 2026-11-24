@@ -59,7 +59,7 @@ app.get('/api/news', (req, res) => {
   catch (err) { res.json({ items: [] }); }
 });
 
-// ─── SIGNAL AI ROUTE (Biquote 7-TF + Smart Events) ───
+// ─── SIGNAL AI ROUTE (Biquote 7-TF + Smart Events + Chart Data) ───
 app.post('/api/signal', async (req, res) => {
   try {
     const { symbol, timeframe, text, contextMode } = req.body;
@@ -80,7 +80,7 @@ app.post('/api/signal', async (req, res) => {
     if (!targetSymbol && text) {
       const chatRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
-        body: JSON.stringify({ model: 'open-mistral-7b', messages: [{ role: 'user', content: text }] })
+        body: JSON.stringify({ model: 'open-mixtral-8x7b', messages: [{ role: 'user', content: text }] })
       });
       const chatData = await chatRes.json();
       return res.json({ signal: chatData.choices[0].message.content, isDataAnalysis: false });
@@ -91,6 +91,7 @@ app.post('/api/signal', async (req, res) => {
     // 2. Fetch 7 Timeframes from Biquote
     const timeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
     const tfData = {};
+    const allChartCandles = {}; // Store candles for the chart
     
     await Promise.all(timeframes.map(async (tf) => {
       try {
@@ -99,10 +100,14 @@ app.post('/api/signal', async (req, res) => {
         
         if (ohlcData && ohlcData.bars && ohlcData.bars.length >= 60) {
           const candles = ohlcData.bars.map(b => ({
-            open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume || 0
+            open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume || 0, time: b.time
           }));
           const calculated = calculateRawIndicators(candles);
-          if (calculated) tfData[tf] = calculated;
+          
+          if (calculated) {
+            tfData[tf] = calculated;
+            allChartCandles[tf] = candles; // Save for chart
+          }
         }
       } catch (e) { console.warn(`Failed to fetch ${tf} for ${targetSymbol}:`, e.message); }
     }));
@@ -111,17 +116,13 @@ app.post('/api/signal', async (req, res) => {
       throw new Error("Could not fetch data from Biquote. Check symbol or try again later.");
     }
 
-    // 3. Build the Macro Context (News & Events) based on user's button click
+    // 3. Build the Macro Context (News & Events)
     let contextStr = "";
-    
     if (contextMode === 'events' || contextMode === 'both') {
       const today = new Date().toISOString().slice(0, 10);
-      
       const { data: events } = await db.admin.from('calendar_events')
         .select('currency, title, impact, actual, forecast, previous, beat_miss')
-        .eq('event_date', today)
-        .in('impact', ['high', 'medium'])
-        .limit(8); 
+        .eq('event_date', today).in('impact', ['high', 'medium']).limit(8); 
         
       if (events && events.length > 0) {
         contextStr += "ECONOMIC EVENTS TODAY:\n";
@@ -153,11 +154,8 @@ app.post('/api/signal', async (req, res) => {
       }
     }
 
-    //     // ... (Keep the 7-TF data fetching and Macro Context building exactly as it is above) ...
-
     // 4. Build the STRICT Institutional Prompt for Mistral
     let prompt = `SYMBOL: ${targetSymbol}\n`;
-    
     if (contextStr) {
       prompt += `\n--- MACRO CONTEXT ---\n${contextStr}\n---------------------\n\n`;
     } else {
@@ -165,7 +163,6 @@ app.post('/api/signal', async (req, res) => {
     }
 
     prompt += `RAW MULTI-TF DATA + QUANT + ORDER FLOW + VOLUME PROFILE\n\n`;
-    
     for (const [tf, data] of Object.entries(tfData)) {
       if (!data) continue;
       prompt += `⏱ ${tf.toUpperCase()} TIMEFRAME\n`;
@@ -177,33 +174,56 @@ app.post('/api/signal', async (req, res) => {
       prompt += `\n`;
     }
 
-    // THE NEW SYSTEM PROMPT - STRICT RULES
     const systemPrompt = `You are a ruthless, institutional algorithmic trader. You do NOT guess. You only trade when there is absolute confluence. 
 
 RULES FOR YOUR ANALYSIS:
-1. HTF DOMINANCE: The 1D and 4h trend ALWAYS overrules the 1m and 5m. If 1D is bearish, you only look for SELL setups, regardless of what the lower timeframes say.
-2. CONFLICT = HOLD: If the technicals (RSI, MACD, CVD) disagree with the Volume Profile (POC/VAH/VAL), or if the HTF disagrees with LTF, you MUST output HOLD.
-3. NEWS FILTER: If a High Impact event is pending (Actual is missing), DO NOT trade. Tell the user to wait for the news to pass. If news just passed, check if it contradicts the technical trend; if it does, output HOLD.
-4. RISK PROTOCOL: Your Stop Loss must be placed behind a recent swing high/low or the POC. Never use a fixed pip stop loss. 
-5. Be extremely conservative. It is better to miss a trade than to take a bad one.
-6. you must be perfect.
-7. don't make wrong decisions `,
-    const userPrompt = `Data for ${targetSymbol}:\n${prompt}\n\nAnalyze the data above. Output a signal (BUY, SELL, or HOLD). Provide strict Entry, SL, and TP levels. Explain your reasoning based ONLY on the data provided.`;
+1. TIMEFRAME SELECTION: Scan all 7 timeframes. Choose the ONE "Primary Timeframe" that offers the clearest trend, best volume profile alignment, and safest Stop Loss placement.
+2. You MUST output your chosen timeframe exactly like this on the first line: "PRIMARY TIMEFRAME: [1m|5m|15m|30m|1h|4h|1d]".
+3. HTF DOMINANCE: The 1D and 4h trend ALWAYS overrules the 1m and 5m. If 1D is bearish, you only look for SELL setups.
+4. CONFLICT = HOLD: If the technicals disagree with the Volume Profile, or if the HTF disagrees with LTF, you MUST output HOLD.
+5. NEWS FILTER: If a High Impact event is pending (Actual is missing), DO NOT trade. Output HOLD.
+6. RISK PROTOCOL: Your Stop Loss must be placed behind a recent swing high/low or the POC. Never use a fixed pip stop loss. 
+7. STRICT FORMATTING: At the VERY END of your response, you MUST output the trade levels EXACTLY in this format (replace X with numbers). If the signal is HOLD, put "0" for all numbers:
+---TRADE LEVELS---
+ENTRY: X
+SL: X
+TP: X`;
 
-    // 5. Send to Mistral (Using Mixtral 8x7B for better reasoning)
+    const userPrompt = `Data for ${targetSymbol}:\n${prompt}\n\nAnalyze the data. Pick the best Primary Timeframe, then output a signal (BUY, SELL, or HOLD) with the strict trade levels format.`;
+
+    // 5. Send to Mistral (Mixtral 8x7B)
     const mistralRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST', 
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
       body: JSON.stringify({ 
-        model: 'open-mixtral-8x7b', // UPGRADED MODEL
+        model: 'open-mixtral-8x7b',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ], 
-        temperature: 0.1 // 0.1 makes it highly logical and uncreative (no guessing)
+        temperature: 0.1 
       })
-    }),
+    });
+    
+    const mistralData = await mistralRes.json();
+    if (!mistralRes.ok) throw new Error(mistralData.error?.message || 'Mistral error');
+    
+    // 6. Send Response Back to Frontend
+    res.json({ 
+      signal: mistralData.choices[0].message.content, 
+      isDataAnalysis: true,
+      rawData: tfData,
+      symbol: targetSymbol,
+      allChartCandles: allChartCandles
+    });
 
+  } catch (err) { 
+    console.error("Signal API Error:", err);
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// ─── AUTH & OTHER ROUTES ───
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
 app.post('/api/auth/signup', authLimiter, async (req, res) => { try { res.json(await auth.signup(req.body)); } catch (err) { res.status(400).json({ error: err.message }); } });
 app.post('/api/auth/login', authLimiter, async (req, res) => { try { res.json({ session: await auth.login(req.body) }); } catch (err) { res.status(401).json({ error: err.message }); } });
